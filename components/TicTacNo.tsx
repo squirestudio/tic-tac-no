@@ -415,211 +415,175 @@ export default function TicTacNo() {
 
   // ── Playing ────────────────────────────────────────────────────────────────
   if (gamePhase === 'playing') {
+    const isHumanTurn = !players[currentPlayer].isAI;
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
-              TIC TAC NO!
-            </h1>
+      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
+
+        {/* Battle Overlay */}
+        {battleAnimation && (() => {
+          const defImg = imageCache[battleAnimation.defenderObject.toLowerCase()];
+          const atkImg = imageCache[battleAnimation.challenger.toLowerCase()];
+          const CombatantCard = ({ word, owner, label, img }: { word: string; owner: number; label: string; img?: string }) => (
+            <div className="text-center">
+              <p className="text-sm text-gray-400 mb-2">{label}</p>
+              <div className="w-28 h-28 rounded-xl border-4 overflow-hidden mx-auto mb-2 relative"
+                style={{ borderColor: players[owner].color }}>
+                {img ? (
+                  <>
+                    <img src={img} alt={word} className="w-full h-full object-cover" />
+                    <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
+                      <p className="text-white text-xs font-bold text-center truncate">{word}</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1"
+                    style={{ background: `${players[owner].color}20` }}>
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <p className="text-white font-bold text-sm text-center px-2 break-words">{word}</p>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-gray-400">{players[owner].name}</p>
+            </div>
+          );
+          return (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 cursor-pointer"
+              onClick={dismissBattleOverlay}>
+              <div className="bg-gradient-to-br from-slate-800 via-slate-700 to-slate-800 rounded-2xl shadow-2xl p-8 border border-yellow-500/50 max-w-lg w-full">
+                <div className="text-center">
+                  <div className="flex justify-around items-center mb-5">
+                    <CombatantCard word={battleAnimation.defenderObject} owner={battleAnimation.defenderOwner} label="Defending" img={defImg} />
+                    <div className="text-4xl font-black text-yellow-400 animate-pulse self-center">⚔️</div>
+                    <CombatantCard word={battleAnimation.challenger} owner={battleAnimation.challengerOwner} label="Attacking" img={atkImg} />
+                  </div>
+                  <div className="p-4 bg-slate-900/50 rounded-xl border-2 border-yellow-500">
+                    {battleAnimation.winner ? (
+                      <p className="text-lg text-yellow-400 font-bold mb-2">🏆 {battleAnimation.winner.toUpperCase()} WINS!</p>
+                    ) : (
+                      <p className="text-lg text-yellow-400 font-bold mb-2 animate-pulse">⚔️ BATTLE IN PROGRESS...</p>
+                    )}
+                    {battleNarrative ? (
+                      <p className="text-gray-200 text-sm leading-relaxed">{battleNarrative}</p>
+                    ) : (
+                      <p className="text-gray-400 text-sm animate-pulse">Chronicling the battle...</p>
+                    )}
+                  </div>
+                  <p className="text-gray-500 text-xs mt-4 animate-pulse">Tap anywhere to continue</p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
+          <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+            TIC TAC NO!
+          </h1>
+          <div className="flex gap-2 items-center">
+            {players.map((player, i) => (
+              <div key={i}
+                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center font-bold text-xs transition-all"
+                style={{
+                  backgroundColor: player.color,
+                  opacity: currentPlayer === i ? 1 : 0.35,
+                  boxShadow: currentPlayer === i ? `0 0 12px ${player.color}` : 'none',
+                  transform: currentPlayer === i ? 'scale(1.1)' : 'scale(1)',
+                }}>
+                <span className="text-white text-xs font-black">P{i + 1}</span>
+                <span className="text-white/80 text-[9px]">{player.isAI ? 'AI' : 'YOU'}</span>
+              </div>
+            ))}
             <button onClick={resetGame} disabled={isGenerating}
-              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2">
-              <RotateCcw size={20} /> Reset
+              className="ml-1 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+              <RotateCcw size={16} />
             </button>
           </div>
+        </div>
 
-          {/* Battle Overlay */}
-          {battleAnimation && (() => {
-            const defImg = imageCache[battleAnimation.defenderObject.toLowerCase()];
-            const atkImg = imageCache[battleAnimation.challenger.toLowerCase()];
-            const CombatantCard = ({ word, owner, label, img }: { word: string; owner: number; label: string; img?: string }) => (
-              <div className="text-center">
-                <p className="text-sm text-gray-400 mb-2">{label}</p>
-                <div className="w-28 h-28 rounded-xl border-4 overflow-hidden mx-auto mb-2 relative"
-                  style={{ borderColor: players[owner].color }}>
-                  {img ? (
-                    <>
-                      <img src={img} alt={word} className="w-full h-full object-cover" />
-                      <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
-                        <p className="text-white text-xs font-bold text-center truncate">{word}</p>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center gap-1"
-                      style={{ background: `${players[owner].color}20` }}>
-                      <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <p className="text-white font-bold text-sm text-center px-2 break-words">{word}</p>
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs text-gray-400">{players[owner].name}</p>
-              </div>
-            );
-            return (
-              <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 cursor-pointer"
-                onClick={dismissBattleOverlay}>
-                <div className="bg-gradient-to-br from-slate-800 via-slate-700 to-slate-800 rounded-2xl shadow-2xl p-10 border border-yellow-500/50 max-w-2xl w-full">
-                  <div className="text-center">
-                    <div className="flex justify-around items-center mb-6">
-                      <CombatantCard word={battleAnimation.defenderObject} owner={battleAnimation.defenderOwner} label="Defending" img={defImg} />
-                      <div className="text-4xl font-black text-yellow-400 animate-pulse self-center">⚔️</div>
-                      <CombatantCard word={battleAnimation.challenger} owner={battleAnimation.challengerOwner} label="Attacking" img={atkImg} />
-                    </div>
-                    <div className="p-5 bg-slate-900/50 rounded-xl border-2 border-yellow-500">
-                      {battleAnimation.winner ? (
-                        <p className="text-xl text-yellow-400 font-bold mb-3">🏆 {battleAnimation.winner.toUpperCase()} WINS!</p>
+        {/* Last move hint */}
+        <div className="px-4 pb-1 shrink-0 h-5">
+          {lastMove && (
+            <p className="text-xs text-yellow-400/70 truncate">{lastMove.player}: {lastMove.action}</p>
+          )}
+        </div>
+
+        {/* Board */}
+        <div className="flex-1 flex items-center justify-center px-3 min-h-0">
+          <div className="w-full max-w-sm">
+            <div className="grid grid-cols-3 gap-2">
+              {board.map((cell, idx) => {
+                const isSelected = selectedCell === idx;
+                const isClickable = isHumanTurn && !isGenerating;
+                return (
+                  <div key={idx}
+                    onClick={() => { if (isClickable) { setSelectedCell(idx); setWordError(''); } }}
+                    className={`aspect-square rounded-xl overflow-hidden transition-all cursor-pointer border-2
+                      ${isSelected ? 'ring-4 ring-white ring-offset-1 ring-offset-transparent scale-105' : ''}
+                      ${isClickable && !cell ? 'active:scale-95' : ''}
+                      ${cell ? '' : 'bg-slate-700/60'}`}
+                    style={cell
+                      ? { borderColor: players[cell.owner].color, background: `linear-gradient(135deg, ${players[cell.owner].color}30, ${players[cell.owner].color}15)` }
+                      : { borderColor: isSelected ? 'white' : '#4a5568' }}>
+                    {cell && (() => {
+                      const img = imageCache[cell.object.toLowerCase()];
+                      return img ? (
+                        <div className="relative w-full h-full">
+                          <img src={img} alt={cell.object} className="w-full h-full object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
+                            <p className="text-white text-xs font-bold text-center truncate">{cell.object}</p>
+                          </div>
+                          <div className="absolute top-1 right-1 w-2 h-2 rounded-full border border-black/30"
+                            style={{ backgroundColor: players[cell.owner].color }} />
+                        </div>
                       ) : (
-                        <p className="text-xl text-yellow-400 font-bold mb-3 animate-pulse">⚔️ BATTLE IN PROGRESS...</p>
-                      )}
-                      {battleNarrative ? (
-                        <p className="text-gray-200 text-base leading-relaxed">{battleNarrative}</p>
-                      ) : (
-                        <p className="text-gray-400 text-sm animate-pulse">Chronicling the battle...</p>
-                      )}
-                    </div>
-                    <p className="text-gray-500 text-sm mt-6 animate-pulse">Tap anywhere to continue</p>
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-1 relative">
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <p className="text-white font-bold text-xs text-center break-words px-1"
+                            style={{ textShadow: `0 0 8px ${players[cell.owner].color}` }}>
+                            {cell.object}
+                          </p>
+                          <div className="absolute bottom-1 right-1 w-2 h-2 rounded-full"
+                            style={{ backgroundColor: players[cell.owner].color }} />
+                        </div>
+                      );
+                    })()}
                   </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Board */}
-            <div className="lg:col-span-2">
-              <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl shadow-2xl p-8 border border-purple-500/20">
-                <div className="mb-6">
-                  <p className="text-sm text-purple-300 font-semibold mb-2">Current Turn</p>
-                  <div className="inline-block px-6 py-3 rounded-xl text-white font-bold text-lg"
-                    style={{ backgroundColor: players[currentPlayer].color, boxShadow: `0 0 20px ${players[currentPlayer].color}60` }}>
-                    {players[currentPlayer].name} {players[currentPlayer].isAI ? '🤖' : '🙋'}
-                  </div>
-                </div>
-
-                {lastMove && (
-                  <div className="mb-6 p-4 bg-slate-900/50 rounded-xl border-l-4 border-yellow-500">
-                    <p className="text-xs text-gray-400 mb-1">Last Move</p>
-                    <p className="text-sm font-semibold text-white">{lastMove.player}</p>
-                    <p className="text-sm text-yellow-400 mt-1">{lastMove.action}</p>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-3 gap-4 bg-slate-900/50 p-6 rounded-xl mb-6">
-                  {board.map((cell, idx) => {
-                    const isSelected = selectedCell === idx;
-                    const isClickable = gamePhase === 'playing' && !players[currentPlayer].isAI && !isGenerating;
-                    return (
-                      <div key={idx}
-                        onClick={() => { if (isClickable) { setSelectedCell(idx); setWordError(''); } }}
-                        className={`aspect-square border-4 rounded-xl overflow-hidden transition-all cursor-pointer flex items-center justify-center
-                          ${isSelected ? 'ring-4 ring-offset-2 ring-white shadow-xl scale-105' : ''}
-                          ${isClickable && !cell ? 'hover:shadow-2xl hover:scale-105' : ''}
-                          ${cell ? '' : 'bg-gradient-to-br from-slate-700 to-slate-600'}`}
-                        style={cell
-                          ? { borderColor: players[cell.owner].color, background: `linear-gradient(135deg, ${players[cell.owner].color}30, ${players[cell.owner].color}15)` }
-                          : { borderColor: '#4a5568' }}>
-                        {cell && (() => {
-                          const img = imageCache[cell.object.toLowerCase()];
-                          return img ? (
-                            <div className="relative w-full h-full">
-                              <img src={img} alt={cell.object} className="w-full h-full object-cover" />
-                              <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
-                                <p className="text-white text-xs font-bold text-center truncate">{cell.object}</p>
-                              </div>
-                              <div className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full border border-black/30"
-                                style={{ backgroundColor: players[cell.owner].color }} />
-                            </div>
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center p-2 relative">
-                              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mb-1" />
-                              <p className="text-white font-bold text-xs text-center leading-tight break-words w-full px-1"
-                                style={{ textShadow: `0 0 10px ${players[cell.owner].color}` }}>
-                                {cell.object}
-                              </p>
-                              <div className="absolute bottom-1.5 right-1.5 w-2.5 h-2.5 rounded-full"
-                                style={{ backgroundColor: players[cell.owner].color }} />
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {isGenerating && !battleAnimation && (
-                  <p className="text-center text-purple-400 font-semibold animate-pulse">Placing...</p>
-                )}
-              </div>
-            </div>
-
-            {/* Sidebar */}
-            <div className="space-y-6">
-              {!players[currentPlayer].isAI && (
-                <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl shadow-2xl p-6 border border-purple-500/20">
-                  <h3 className="font-bold text-xl text-white mb-4">Your Move</h3>
-                  {selectedCell !== null ? (
-                    <div className="space-y-3">
-                      <div className="text-center p-4 bg-slate-900/50 rounded-lg border-2 border-purple-400">
-                        <p className="text-sm text-purple-300">Selected Square</p>
-                        <p className="text-3xl font-bold text-white">{selectedCell + 1}</p>
-                      </div>
-                      <input
-                        type="text"
-                        value={objectInput}
-                        onChange={e => { setObjectInput(e.target.value); setWordError(''); }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && objectInput.trim() && !isGenerating) submitWord();
-                        }}
-                        placeholder="Type anything..."
-                        maxLength={24}
-                        disabled={isGenerating}
-                        autoFocus
-                        className={`w-full bg-slate-700 text-white rounded-lg px-4 py-3 border-2 outline-none placeholder-gray-500 disabled:opacity-50 ${wordError ? 'border-red-500' : 'border-purple-400 focus:border-purple-300'}`}
-                      />
-                      {wordError && <p className="text-red-400 text-xs">{wordError}</p>}
-                      <button
-                        onClick={submitWord}
-                        disabled={isGenerating || !objectInput.trim()}
-                        className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-lg hover:shadow-xl transition-all disabled:opacity-50">
-                        {isGenerating ? '⏳ Placing...' : '▶️ Submit'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-center p-6 bg-slate-900/50 rounded-lg border-2 border-dashed border-purple-400">
-                      <div className="text-3xl mb-2">👆</div>
-                      <p className="text-sm text-purple-300">Click a square to begin</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl shadow-2xl p-6 border border-purple-500/20">
-                <h3 className="font-bold text-lg text-white mb-4">Players</h3>
-                <div className="space-y-3">
-                  {players.map(player => (
-                    <div key={player.id}
-                      className={`p-4 rounded-xl transition-all ${currentPlayer === player.id ? 'ring-2 scale-105' : 'opacity-70'}`}
-                      style={{ backgroundColor: player.color }}>
-                      <p className="text-white font-bold">{player.name}</p>
-                      <p className="text-white text-sm opacity-90">{player.isAI ? '🤖 AI' : '🙋 Human'}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                );
+              })}
             </div>
           </div>
+        </div>
 
-          {battleLog.length > 0 && (
-            <div className="mt-8 bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl shadow-2xl p-6 border border-purple-500/20">
-              <h3 className="font-bold text-xl text-white mb-4">⚔️ Battle History</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {[...battleLog].reverse().map((battle, idx) => (
-                  <div key={idx} className="p-3 bg-slate-900/50 rounded-lg text-sm border-l-4 border-yellow-500">
-                    <p className="font-semibold text-white">"{battle.challenger}" vs "{battle.defender}"</p>
-                    <p className="text-yellow-400 mt-1">🏆 {battle.winner}</p>
-                  </div>
-                ))}
+        {/* Input bar */}
+        <div className="px-3 pb-6 pt-2 shrink-0">
+          {isHumanTurn ? (
+            <div className="space-y-1.5">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={objectInput}
+                  onChange={e => { setObjectInput(e.target.value); setWordError(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter' && objectInput.trim() && !isGenerating) submitWord(); }}
+                  placeholder={selectedCell !== null ? 'Type your word...' : 'Select a square first'}
+                  maxLength={24}
+                  disabled={isGenerating || selectedCell === null}
+                  className={`flex-1 bg-slate-700 text-white rounded-xl px-4 py-3 border-2 outline-none placeholder-gray-500 disabled:opacity-50 text-sm ${wordError ? 'border-red-500' : 'border-purple-400 focus:border-purple-300'}`}
+                />
+                <button
+                  onClick={submitWord}
+                  disabled={isGenerating || !objectInput.trim() || selectedCell === null}
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold px-5 rounded-xl disabled:opacity-50 shrink-0">
+                  {isGenerating ? '⏳' : '▶'}
+                </button>
               </div>
+              {wordError && <p className="text-red-400 text-xs px-1">{wordError}</p>}
+            </div>
+          ) : (
+            <div className="text-center py-3">
+              <p className="text-purple-400 text-sm animate-pulse">
+                {isGenerating ? `${players[currentPlayer].name} is placing...` : `${players[currentPlayer].name} is thinking...`}
+              </p>
             </div>
           )}
         </div>
