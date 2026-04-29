@@ -27,6 +27,7 @@ export async function POST(req: Request) {
     },
     body: JSON.stringify({
       prompt: `${word}, epic fantasy battle card art, dramatic lighting, dark background, vivid colors, centered subject, highly detailed, no text`,
+      negative_prompt: 'nude, nudity, sexual, explicit, nsfw, gore, blood, violence, disturbing, inappropriate, offensive, racist, hateful',
       image_size: 'square_hd',
       num_inference_steps: 4,
       num_images: 1,

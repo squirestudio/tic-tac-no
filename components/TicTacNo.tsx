@@ -86,6 +86,7 @@ export default function TicTacNo() {
   const [battleAnimation, setBattleAnimation] = useState<BattleAnimation | null>(null);
   const [battleNarrative, setBattleNarrative] = useState('');
   const [lastMove, setLastMove] = useState<{ player: string; action: string; type: string } | null>(null);
+  const [wordError, setWordError] = useState('');
   const pendingContinuationRef = useRef<(() => void) | null>(null);
   const usedWordsRef = useRef<Set<string>>(new Set());
   const pendingImages = useRef<Set<string>>(new Set());
@@ -321,6 +322,28 @@ export default function TicTacNo() {
     pendingImages.current = new Set();
   };
 
+  const submitWord = useCallback(async () => {
+    const word = objectInput.trim();
+    if (!word || isGenerating || selectedCell === null) return;
+    setIsGenerating(true);
+    try {
+      const res = await fetch('/api/validate-word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word }),
+      });
+      const { ok } = await res.json();
+      if (!ok) {
+        setWordError("That word isn't allowed — please try something else.");
+        setIsGenerating(false);
+        return;
+      }
+    } catch {
+      // if validation fails open, allow through
+    }
+    placePiece(selectedCell, word, currentPlayer, board);
+  }, [objectInput, isGenerating, selectedCell, currentPlayer, board, placePiece]);
+
   // ── Setup ──────────────────────────────────────────────────────────────────
   if (gamePhase === 'setup') {
     return (
@@ -485,7 +508,7 @@ export default function TicTacNo() {
                     const isClickable = gamePhase === 'playing' && !players[currentPlayer].isAI && !isGenerating;
                     return (
                       <div key={idx}
-                        onClick={() => isClickable && setSelectedCell(idx)}
+                        onClick={() => { if (isClickable) { setSelectedCell(idx); setWordError(''); } }}
                         className={`aspect-square border-4 rounded-xl overflow-hidden transition-all cursor-pointer flex items-center justify-center
                           ${isSelected ? 'ring-4 ring-offset-2 ring-white shadow-xl scale-105' : ''}
                           ${isClickable && !cell ? 'hover:shadow-2xl hover:scale-105' : ''}
@@ -541,22 +564,19 @@ export default function TicTacNo() {
                       <input
                         type="text"
                         value={objectInput}
-                        onChange={e => setObjectInput(e.target.value)}
+                        onChange={e => { setObjectInput(e.target.value); setWordError(''); }}
                         onKeyDown={e => {
-                          if (e.key === 'Enter' && objectInput.trim() && !isGenerating) {
-                            placePiece(selectedCell, objectInput.trim(), currentPlayer, board);
-                          }
+                          if (e.key === 'Enter' && objectInput.trim() && !isGenerating) submitWord();
                         }}
                         placeholder="Type anything..."
                         maxLength={24}
                         disabled={isGenerating}
                         autoFocus
-                        className="w-full bg-slate-700 text-white rounded-lg px-4 py-3 border-2 border-purple-400 outline-none focus:border-purple-300 placeholder-gray-500 disabled:opacity-50"
+                        className={`w-full bg-slate-700 text-white rounded-lg px-4 py-3 border-2 outline-none placeholder-gray-500 disabled:opacity-50 ${wordError ? 'border-red-500' : 'border-purple-400 focus:border-purple-300'}`}
                       />
+                      {wordError && <p className="text-red-400 text-xs">{wordError}</p>}
                       <button
-                        onClick={() => {
-                          if (objectInput.trim()) placePiece(selectedCell, objectInput.trim(), currentPlayer, board);
-                        }}
+                        onClick={submitWord}
                         disabled={isGenerating || !objectInput.trim()}
                         className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-lg hover:shadow-xl transition-all disabled:opacity-50">
                         {isGenerating ? '⏳ Placing...' : '▶️ Submit'}
