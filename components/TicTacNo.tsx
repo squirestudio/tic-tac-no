@@ -92,6 +92,13 @@ export default function TicTacNo() {
   const pendingContinuationRef = useRef<(() => void) | null>(null);
   const usedWordsRef = useRef<Set<string>>(new Set());
   const pendingImages = useRef<Set<string>>(new Set());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (selectedCell !== null && !players[currentPlayer].isAI) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [selectedCell, currentPlayer, players]);
 
   const CACHE_KEY = 'ttn_image_cache';
   const [imageCache, setImageCache] = useState<Record<string, string>>(() => {
@@ -349,7 +356,7 @@ export default function TicTacNo() {
   // ── Setup ──────────────────────────────────────────────────────────────────
   if (gamePhase === 'setup') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6" style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-12">
             <h1 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400 mb-2">
@@ -378,7 +385,7 @@ export default function TicTacNo() {
                         onChange={e => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, isAI: e.target.checked } : p))}
                         className="w-5 h-5 cursor-pointer"
                       />
-                      <span className="font-semibold text-white">{player.isAI ? '🤖 AI' : '🙋 Human'}</span>
+                      <span className="font-semibold text-white">{player.isAI ? 'AI' : 'Human'}</span>
                     </label>
                   </div>
                   {player.isAI && (
@@ -476,7 +483,7 @@ export default function TicTacNo() {
         })()}
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
+        <div className="flex items-center justify-between px-4 pb-2 shrink-0" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
             TIC TAC NO!
           </h1>
@@ -509,8 +516,8 @@ export default function TicTacNo() {
         </div>
 
         {/* Board */}
-        <div className="flex-1 flex items-center justify-center px-3 min-h-0">
-          <div className="w-full max-w-sm">
+        <div className="flex-1 flex items-center justify-center min-h-0 px-3">
+          <div className="w-full">
             <div className="grid grid-cols-3 gap-2">
               {board.map((cell, idx) => {
                 const isSelected = selectedCell === idx;
@@ -556,11 +563,12 @@ export default function TicTacNo() {
         </div>
 
         {/* Input bar */}
-        <div className="px-3 pb-6 pt-2 shrink-0">
+        <div className="px-3 pt-2 shrink-0" style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
           {isHumanTurn ? (
             <div className="space-y-1.5">
               <div className="flex gap-2">
                 <input
+                  ref={inputRef}
                   type="text"
                   value={objectInput}
                   onChange={e => { setObjectInput(e.target.value); setWordError(''); }}
