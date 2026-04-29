@@ -3,6 +3,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { RotateCcw, Crown } from 'lucide-react';
 
+const API = process.env.NEXT_PUBLIC_API_BASE ?? '';
+
 type Player = { id: number; name: string; isAI: boolean; color: string; difficulty: 'easy' | 'medium' | 'hard' };
 type Cell = { object: string; owner: number } | null;
 type BattleAnimation = {
@@ -106,7 +108,7 @@ export default function TicTacNo() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
-    fetch('/api/generate-image', {
+    fetch(`${API}/api/generate-image`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ word }),
@@ -144,7 +146,7 @@ export default function TicTacNo() {
   ) => {
     setBattleNarrative('');
     try {
-      const response = await fetch('/api/battle-narrative', {
+      const response = await fetch(`${API}/api/battle-narrative`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ challenger, defender }),
@@ -327,7 +329,7 @@ export default function TicTacNo() {
     if (!word || isGenerating || selectedCell === null) return;
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/validate-word', {
+      const res = await fetch(`${API}/api/validate-word`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ word }),
