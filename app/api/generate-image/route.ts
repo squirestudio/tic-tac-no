@@ -1,7 +1,6 @@
-import { fal } from '@fal-ai/client';
 import { Redis } from '@upstash/redis';
 
-fal.config({ credentials: process.env.FAL_KEY });
+export const maxDuration = 30;
 
 const redis =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
@@ -20,16 +19,29 @@ export async function POST(req: Request) {
     if (cached) return Response.json({ url: cached });
   }
 
-  const result = await fal.subscribe('fal-ai/flux/schnell', {
-    input: {
+  const response = await fetch('https://fal.run/fal-ai/flux/schnell', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${process.env.FAL_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
       prompt: `${word}, epic fantasy battle card art, dramatic lighting, dark background, vivid colors, centered subject, highly detailed, no text`,
       image_size: 'square_hd',
       num_inference_steps: 4,
       num_images: 1,
-    },
+    }),
   });
 
-  const url = (result.data as { images: { url: string }[] }).images[0].url;
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('fal.ai error:', err);
+    return Response.json({ error: err }, { status: 500 });
+  }
+
+  const data = await response.json() as { images: { url: string }[] };
+  const url = data.images[0].url;
+
   if (redis) await redis.set(key, url);
 
   return Response.json({ url });
