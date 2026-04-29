@@ -19,3 +19,7 @@ export async function POST(req: Request) {
 
   return Response.json({ ok });
 }
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204 });
+}
