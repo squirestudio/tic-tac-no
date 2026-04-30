@@ -1,9 +1,13 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Crown } from 'lucide-react';
+import { RotateCcw, Crown, ArrowLeft, Send } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_BASE ?? '';
+
+// Replace with real AdMob IDs before App Store submission
+const ADMOB_BANNER_ID = 'ca-app-pub-3940256099942544/2934735716';
+const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-3940256099942544/4411468910';
 
 type Player = { id: number; name: string; isAI: boolean; color: string; difficulty: 'easy' | 'medium' | 'hard' };
 type Cell = { object: string; owner: number } | null;
@@ -19,14 +23,58 @@ const AI_WORDS = {
   easy: [
     'feather', 'bubble', 'noodle', 'dandelion', 'tissue', 'cotton', 'puddle',
     'pebble', 'smoke', 'drizzle', 'yawn', 'marshmallow', 'slime', 'snowflake', 'fog',
+    'petal', 'leaf', 'dewdrop', 'cobweb', 'candle', 'pillow', 'mitten', 'button',
+    'ribbon', 'confetti', 'chalk', 'crayon', 'napkin', 'sponge', 'raindrop',
+    'breeze', 'whisper', 'hiccup', 'sneeze', 'giggle', 'pudding', 'lollipop',
+    'cupcake', 'sprinkle', 'jellybean', 'daisy', 'butterfly', 'ladybug', 'hamster',
+    'goldfish', 'tadpole', 'caterpillar', 'dust bunny', 'yarn', 'toothpick', 'straw',
+    'popsicle', 'balloon', 'kite', 'pinwheel', 'moth', 'sparrow', 'snail', 'worm',
+    'mushroom', 'acorn', 'twig', 'ice cube', 'snowball', 'mist', 'dew', 'steam',
+    'cookie', 'crumb', 'fluff', 'wisp', 'soap', 'cotton candy', 'paper clip',
+    'rubber band', 'wet noodle', 'soggy cracker', 'empty bottle', 'bath sponge',
+    'wind chime', 'paper boat', 'origami crane', 'bubble wrap', 'lint', 'speck',
+    'teardrop', 'dandelion seed', 'flower crown', 'daydream', 'hiccup', 'sunbeam',
+    'rainbow', 'cloud', 'kitten', 'puppy', 'hamster wheel', 'bouncy ball',
   ],
   medium: [
     'fire', 'water', 'lightning', 'shadow', 'sword', 'ice', 'stone', 'tornado',
     'acid', 'wind', 'plague', 'rust', 'mirror', 'magnet', 'earthquake',
+    'volcano', 'avalanche', 'tsunami', 'hurricane', 'blizzard', 'wildfire',
+    'flood', 'sandstorm', 'whirlpool', 'landslide', 'poison', 'venom', 'curse',
+    'spell', 'arrow', 'spear', 'axe', 'shield', 'armor', 'cannon', 'laser',
+    'chainsaw', 'dragon', 'wolf', 'bear', 'shark', 'eagle', 'viper', 'scorpion',
+    'panther', 'rhino', 'crocodile', 'thorn', 'quicksand', 'trapdoor', 'minotaur',
+    'golem', 'vampire', 'werewolf', 'wraith', 'demon', 'inferno', 'glacier',
+    'tidal wave', 'geyser', 'meteor', 'plasma', 'napalm', 'radiation',
+    'solar flare', 'sonic boom', 'shockwave', 'black ice', 'lava', 'magma',
+    'thunder', 'hailstorm', 'earthquake', 'wildfire', 'blight', 'miasma',
+    'famine', 'drought', 'eclipse', 'tremor', 'comet', 'gamma ray', 'emp pulse',
+    'uranium', 'mercury', 'acid rain', 'permafrost', 'landmine', 'catapult',
+    'trebuchet', 'battering ram', 'ballista', 'flamethrower', 'grenade',
+    'kraken', 'hydra', 'basilisk', 'chimera', 'gorgon', 'cyclops', 'banshee',
   ],
   hard: [
     'black hole', 'entropy', 'void', 'supernova', 'time', 'gravity', 'antimatter',
     'singularity', 'dark energy', 'oblivion', 'infinity', 'absolute zero', 'event horizon', 'heat death',
+    'dark matter', 'neutron star', 'gamma burst', 'vacuum decay', 'time dilation',
+    'causality', 'paradox', 'dimensional rift', 'multiverse', 'big bang',
+    'false vacuum', 'quantum foam', 'hawking radiation', 'spaghettification',
+    'quasar', 'magnetar', 'pulsar', 'proton decay', 'planck time',
+    'quantum tunneling', 'decoherence', 'superposition', 'annihilation',
+    'omnicide', 'the nothing', 'eternal darkness', 'maximum entropy',
+    'arrow of time', 'wormhole', 'white hole', 'cosmic string', 'tachyon',
+    'dimensional collapse', 'reality erasure', 'primordial chaos', 'endless abyss',
+    'universal silence', 'chronoshift', 'null space', 'quantum erasure',
+    'spacetime tear', 'infinite recursion', 'total entropy', 'cosmic horror',
+    'eldritch void', 'the beyond', 'dead universe', 'cold void', 'the last light',
+    'omega point', 'causal horizon', 'vacuum energy', 'zero-point field',
+    'nothingness', 'stellar collapse', 'photon decay', 'false dawn',
+    'heat equalization', 'the great filter', 'fermi paradox', 'roko basilisk',
+    'simulation end', 'entropy maximum', 'time reversal', 'closed timelike curve',
+    'chronological end', 'the final entropy', 'void singularity', 'existential null',
+    'cosmic inflation', 'planck epoch', 'de sitter space', 'dark era',
+    'degenerate era', 'black dwarf', 'iron star', 'the last photon',
+    'heat death echo', 'quantum gravity', 'loop quantum', 'string theory end',
   ],
 };
 
@@ -93,12 +141,44 @@ export default function TicTacNo() {
   const usedWordsRef = useRef<Set<string>>(new Set());
   const pendingImages = useRef<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
+  const gamesPlayedRef = useRef(0);
+  const interstitialReadyRef = useRef(false);
 
   useEffect(() => {
     if (selectedCell !== null && !players[currentPlayer].isAI) {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [selectedCell, currentPlayer, players]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { AdMob } = await import('@capacitor-community/admob');
+        await AdMob.initialize();
+        await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true });
+        interstitialReadyRef.current = true;
+      } catch {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { AdMob, BannerAdSize, BannerAdPosition } = await import('@capacitor-community/admob');
+        if (gamePhase === 'playing' || gamePhase === 'gameOver') {
+          await AdMob.showBanner({
+            adId: ADMOB_BANNER_ID,
+            adSize: BannerAdSize.ADAPTIVE_BANNER,
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: 0,
+            isTesting: true,
+          });
+        } else {
+          await AdMob.hideBanner();
+        }
+      } catch {}
+    })();
+  }, [gamePhase]);
 
   const CACHE_KEY = 'ttn_image_cache';
   const [imageCache, setImageCache] = useState<Record<string, string>>(() => {
@@ -331,6 +411,22 @@ export default function TicTacNo() {
     pendingImages.current = new Set();
   };
 
+  const restartGame = () => {
+    const emptyBoard: Cell[] = Array(9).fill(null);
+    setBoard(emptyBoard);
+    setCurrentPlayer(0);
+    setSelectedCell(null);
+    setObjectInput('');
+    setBattleLog([]);
+    setWinner(null);
+    setBattleAnimation(null);
+    setBattleNarrative('');
+    setLastMove(null);
+    pendingContinuationRef.current = null;
+    usedWordsRef.current = new Set();
+    if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
+  };
+
   const submitWord = useCallback(async () => {
     const word = objectInput.trim();
     if (!word || isGenerating || selectedCell === null) return;
@@ -356,16 +452,10 @@ export default function TicTacNo() {
   // ── Setup ──────────────────────────────────────────────────────────────────
   if (gamePhase === 'setup') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6" style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
-        <div className="max-w-2xl mx-auto">
-          <div className="text-center mb-12">
-            <h1 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400 mb-2">
-              TIC TAC NO!
-            </h1>
-            <p className="text-xl text-purple-300">Battle with anything you can imagine</p>
-          </div>
-
-          <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl shadow-2xl p-8 border border-purple-500/20">
+      <div className="min-h-screen bg-cover bg-center bg-no-repeat flex flex-col justify-end p-6"
+        style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))', paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
+        <div className="max-w-2xl mx-auto w-full">
+          <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30">
             <h2 className="text-2xl font-bold text-white mb-6">Configure Players</h2>
             <div className="space-y-4 mb-8">
               {players.map((player, idx) => (
@@ -385,7 +475,7 @@ export default function TicTacNo() {
                         onChange={e => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, isAI: e.target.checked } : p))}
                         className="w-5 h-5 cursor-pointer"
                       />
-                      <span className="font-semibold text-white">{player.isAI ? 'AI' : 'Human'}</span>
+                      <span className="font-semibold text-white">AI</span>
                     </label>
                   </div>
                   {player.isAI && (
@@ -396,7 +486,7 @@ export default function TicTacNo() {
                             ${player.difficulty === level
                               ? 'bg-white/20 text-white ring-2 ring-white/50'
                               : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}>
-                          {level === 'easy' ? '🌱 Easy' : level === 'medium' ? '⚔️ Medium' : '💀 Hard'}
+                          {level === 'easy' ? 'Easy' : level === 'medium' ? 'Medium' : 'Hard'}
                         </button>
                       ))}
                     </div>
@@ -412,7 +502,7 @@ export default function TicTacNo() {
                 if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
               }}
               className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl hover:shadow-2xl transition-all">
-              Start Game ▶️
+              Play
             </button>
           </div>
         </div>
@@ -424,7 +514,7 @@ export default function TicTacNo() {
   if (gamePhase === 'playing') {
     const isHumanTurn = !players[currentPlayer].isAI;
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
+      <div className="h-[100dvh] flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
 
         {/* Battle Overlay */}
         {battleAnimation && (() => {
@@ -484,9 +574,10 @@ export default function TicTacNo() {
 
         {/* Header */}
         <div className="flex items-center justify-between px-4 pb-2 shrink-0" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
-          <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
-            TIC TAC NO!
-          </h1>
+          <button onClick={resetGame} disabled={isGenerating}
+            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+            <ArrowLeft size={18} />
+          </button>
           <div className="flex gap-2 items-center">
             {players.map((player, i) => (
               <div key={i}
@@ -501,11 +592,11 @@ export default function TicTacNo() {
                 <span className="text-white/80 text-[9px]">{player.isAI ? 'AI' : 'YOU'}</span>
               </div>
             ))}
-            <button onClick={resetGame} disabled={isGenerating}
-              className="ml-1 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-              <RotateCcw size={16} />
-            </button>
           </div>
+          <button onClick={restartGame} disabled={isGenerating}
+            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+            <RotateCcw size={16} />
+          </button>
         </div>
 
         {/* Last move hint */}
@@ -517,15 +608,15 @@ export default function TicTacNo() {
 
         {/* Board */}
         <div className="flex-1 flex items-center justify-center min-h-0 px-3">
-          <div className="w-full">
-            <div className="grid grid-cols-3 gap-2">
+          <div className="aspect-square" style={{ width: 'min(calc(100vw - 24px), calc(100dvh - 260px))' }}>
+            <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full">
               {board.map((cell, idx) => {
                 const isSelected = selectedCell === idx;
                 const isClickable = isHumanTurn && !isGenerating;
                 return (
                   <div key={idx}
                     onClick={() => { if (isClickable) { setSelectedCell(idx); setWordError(''); } }}
-                    className={`aspect-square rounded-xl overflow-hidden transition-all cursor-pointer border-2
+                    className={`rounded-xl overflow-hidden transition-all cursor-pointer border-2
                       ${isSelected ? 'ring-4 ring-white ring-offset-1 ring-offset-transparent scale-105' : ''}
                       ${isClickable && !cell ? 'active:scale-95' : ''}
                       ${cell ? '' : 'bg-slate-700/60'}`}
@@ -576,13 +667,16 @@ export default function TicTacNo() {
                   placeholder={selectedCell !== null ? 'Type your word...' : 'Select a square first'}
                   maxLength={24}
                   disabled={isGenerating || selectedCell === null}
-                  className={`flex-1 bg-slate-700 text-white rounded-xl px-4 py-3 border-2 outline-none placeholder-gray-500 disabled:opacity-50 text-sm ${wordError ? 'border-red-500' : 'border-purple-400 focus:border-purple-300'}`}
+                  style={{ fontSize: '16px' }}
+                  className={`flex-1 bg-slate-700 text-white rounded-xl px-4 py-3 border-2 outline-none placeholder-gray-500 disabled:opacity-50 ${wordError ? 'border-red-500' : 'border-purple-400 focus:border-purple-300'}`}
                 />
                 <button
                   onClick={submitWord}
                   disabled={isGenerating || !objectInput.trim() || selectedCell === null}
                   className="bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold px-5 rounded-xl disabled:opacity-50 shrink-0">
-                  {isGenerating ? '⏳' : '▶'}
+                  {isGenerating
+                    ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    : <Send size={16} />}
                 </button>
               </div>
               {wordError && <p className="text-red-400 text-xs px-1">{wordError}</p>}
@@ -595,6 +689,8 @@ export default function TicTacNo() {
             </div>
           )}
         </div>
+        {/* Space reserved for native banner ad */}
+        <div className="h-[80px] shrink-0" />
       </div>
     );
   }
@@ -614,10 +710,26 @@ export default function TicTacNo() {
             <Crown className="inline mr-2" size={28} />
             {winnerPlayer.name}
           </div>
-          <button onClick={resetGame}
+          <button
+            onClick={async () => {
+              gamesPlayedRef.current += 1;
+              if (gamesPlayedRef.current % 3 === 0 && interstitialReadyRef.current) {
+                try {
+                  const { AdMob } = await import('@capacitor-community/admob');
+                  interstitialReadyRef.current = false;
+                  await AdMob.showInterstitial();
+                  AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true })
+                    .then(() => { interstitialReadyRef.current = true; })
+                    .catch(() => {});
+                } catch {}
+              }
+              resetGame();
+            }}
             className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
             Play Again
           </button>
+          {/* Space reserved for native banner ad */}
+          <div className="h-[50px] mt-4" />
         </div>
       </div>
     );
