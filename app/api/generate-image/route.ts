@@ -26,8 +26,8 @@ export async function POST(req: Request) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      prompt: `${word}, cartoon emoji style, simple bold illustration, thick black outlines, bright saturated colors, flat design, cute and silly, white background, centered, no text`,
-      negative_prompt: 'realistic, photorealistic, detailed texture, dark, gritty, nude, nudity, sexual, explicit, nsfw, gore, blood, violence, disturbing, inappropriate, offensive, racist, hateful',
+      prompt: `${word}, simple cartoon illustration, thick black outlines, bright saturated colors, flat design, white background, centered, no text, no face, no eyes, no mouth`,
+      negative_prompt: 'face, eyes, mouth, smile, anthropomorphic, humanized, realistic, photorealistic, detailed texture, dark, gritty, nude, nudity, sexual, explicit, nsfw, gore, blood, violence, disturbing, inappropriate, offensive, racist, hateful',
       image_size: 'square_hd',
       num_inference_steps: 4,
       num_images: 1,
