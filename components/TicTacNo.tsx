@@ -154,7 +154,7 @@ export default function TicTacNo() {
     (async () => {
       try {
         const { AdMob } = await import('@capacitor-community/admob');
-        await AdMob.initialize();
+        await AdMob.initialize({ testingDevices: ['38fb9eede2a049e7edc2b60ac79bc09e'] });
         await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true });
         interstitialReadyRef.current = true;
       } catch {}
