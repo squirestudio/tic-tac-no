@@ -368,28 +368,58 @@ export default function TicTacNo() {
     const { difficulty } = players[aiPlayerIndex];
     const words = AI_WORDS[difficulty];
     const available = words.filter(w => !usedWordsRef.current.has(w.toLowerCase()));
-    const pool = available.length > 0 ? available : words;
-    const obj = pool[Math.floor(Math.random() * pool.length)];
+    const wordPool = available.length > 0 ? available : words;
+    const obj = wordPool[Math.floor(Math.random() * wordPool.length)];
+
+    const empty = attackable.filter(idx => currentBoard[idx] === null);
+    const occupied = attackable.filter(idx => currentBoard[idx] !== null);
+    const strategicPositions = [4, 0, 2, 6, 8, 1, 3, 5, 7];
 
     let spot: number;
     if (difficulty === 'easy') {
-      const empty = attackable.filter(idx => currentBoard[idx] === null);
-      spot = (empty.length > 0 ? empty : attackable)[Math.floor(Math.random() * (empty.length || attackable.length))];
+      // 20% chance to attack a random occupied cell, otherwise prefer empty
+      if (occupied.length > 0 && Math.random() < 0.2) {
+        spot = occupied[Math.floor(Math.random() * occupied.length)];
+      } else {
+        const pool = empty.length > 0 ? empty : occupied;
+        spot = pool[Math.floor(Math.random() * pool.length)];
+      }
     } else if (difficulty === 'medium') {
       const win = findWinMove(currentBoard, aiPlayerIndex);
-      const block = win === null
-        ? (() => {
-            for (const opp of players.filter(p => p.id !== aiPlayerIndex)) {
-              const b = findWinMove(currentBoard, opp.id);
-              if (b !== null) return b;
-            }
-            return null;
-          })()
-        : null;
-      const empty = attackable.filter(idx => currentBoard[idx] === null);
-      spot = win ?? block ?? (empty.length > 0 ? empty : attackable)[Math.floor(Math.random() * (empty.length || attackable.length))];
+      const block = (() => {
+        for (const opp of players.filter(p => p.id !== aiPlayerIndex)) {
+          const b = findWinMove(currentBoard, opp.id);
+          if (b !== null) return b;
+        }
+        return null;
+      })();
+      // 50% chance to attack a strategic occupied cell rather than take empty
+      const strategicOccupied = strategicPositions.find(idx => currentBoard[idx] !== null && currentBoard[idx]!.owner !== aiPlayerIndex);
+      const attackStrategic = strategicOccupied !== undefined && Math.random() < 0.5;
+      spot = win ?? block ?? (attackStrategic ? strategicOccupied! : (empty.length > 0 ? empty[Math.floor(Math.random() * empty.length)] : occupied[Math.floor(Math.random() * occupied.length)]));
     } else {
-      spot = findOptimalSpot(currentBoard, aiPlayerIndex, players);
+      // Hard: always plays optimally, prefers attacking human cells at key positions
+      const win = findWinMove(currentBoard, aiPlayerIndex);
+      if (win !== null) {
+        spot = win;
+      } else {
+        const block = (() => {
+          for (const opp of players.filter(p => p.id !== aiPlayerIndex)) {
+            const b = findWinMove(currentBoard, opp.id);
+            if (b !== null) return b;
+          }
+          return null;
+        })();
+        if (block !== null) {
+          spot = block;
+        } else {
+          // Take the best strategic position — attack occupied over empty when position is key
+          const bestSpot = strategicPositions.find(idx => currentBoard[idx] !== null && currentBoard[idx]!.owner !== aiPlayerIndex)
+            ?? strategicPositions.find(idx => currentBoard[idx] === null)
+            ?? attackable[0];
+          spot = bestSpot;
+        }
+      }
     }
 
     placePiece(spot, obj, aiPlayerIndex, currentBoard);
