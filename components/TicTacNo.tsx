@@ -553,7 +553,7 @@ export default function TicTacNo() {
   if (gamePhase === 'playing') {
     const isHumanTurn = !players[currentPlayer].isAI;
     return (
-      <div className="h-[100dvh] flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
+      <div className="h-[100dvh] flex flex-col bg-black overflow-hidden">
 
         {/* Battle Overlay */}
         {battleAnimation && (() => {
