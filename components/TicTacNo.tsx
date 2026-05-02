@@ -121,6 +121,7 @@ function checkWinner(board: Cell[]) {
 
 export default function TicTacNo() {
   const [gamePhase, setGamePhase] = useState<'setup' | 'playing' | 'gameOver'>('setup');
+  const [uiVisible, setUiVisible] = useState(false);
   const [players, setPlayers] = useState<Player[]>([
     { id: 0, name: 'Player 1', isAI: false, color: '#FF6B6B', difficulty: 'medium' },
     { id: 1, name: 'Player 2', isAI: true,  color: '#4ECDC4', difficulty: 'medium' },
@@ -149,6 +150,14 @@ export default function TicTacNo() {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [selectedCell, currentPlayer, players]);
+
+  useEffect(() => {
+    if (gamePhase === 'setup') {
+      setUiVisible(false);
+      const timer = setTimeout(() => setUiVisible(true), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [gamePhase]);
 
   useEffect(() => {
     (async () => {
@@ -485,7 +494,7 @@ export default function TicTacNo() {
       <div className="min-h-screen bg-cover bg-center bg-no-repeat flex flex-col justify-end p-6"
         style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))', paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto w-full">
-          <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30">
+          <div className={`bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30 transition-opacity duration-700 ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
             <h2 className="text-2xl font-bold text-white mb-6">Configure Players</h2>
             <div className="space-y-4 mb-8">
               {players.map((player, idx) => (
