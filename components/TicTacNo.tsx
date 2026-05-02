@@ -612,23 +612,32 @@ export default function TicTacNo() {
         })()}
 
         {/* Header */}
-        <div className="shrink-0 px-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
-          {/* Back + Restart row */}
-          <div className="flex items-center justify-between mb-2">
-            <button onClick={resetGame} disabled={isGenerating}
-              className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-              <ArrowLeft size={18} />
-            </button>
-            <button onClick={restartGame} disabled={isGenerating}
-              className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-              <RotateCcw size={16} />
-            </button>
-          </div>
-          {/* Player indicators row */}
-          <div className="flex gap-2 pb-2">
+        <div className="shrink-0 px-4 flex items-center justify-between" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
+          <button onClick={resetGame} disabled={isGenerating}
+            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+            <ArrowLeft size={18} />
+          </button>
+          <img src="/logo.png" alt="Tic Attack Toe" className="h-14" />
+          <button onClick={restartGame} disabled={isGenerating}
+            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+            <RotateCcw size={16} />
+          </button>
+        </div>
+
+        {/* Last move hint */}
+        <div className="px-4 pb-1 shrink-0 h-5">
+          {lastMove && (
+            <p className="text-xs text-yellow-400/70 truncate">{lastMove.player}: {lastMove.action}</p>
+          )}
+        </div>
+
+        {/* Board */}
+        <div className="flex-1 flex flex-col items-center justify-center min-h-0 px-3 gap-2">
+          {/* Player indicators above board */}
+          <div className="flex gap-2" style={{ width: 'min(calc(100vw - 24px), calc(100dvh - 310px))' }}>
             {players.map((player, i) => (
               <div key={i}
-                className="flex-1 rounded-lg flex flex-col items-center justify-center py-2 font-bold transition-all"
+                className="flex-1 rounded-lg flex flex-col items-center justify-center py-1.5 font-bold transition-all"
                 style={{
                   backgroundColor: player.color,
                   opacity: currentPlayer === i ? 1 : 0.35,
@@ -641,18 +650,7 @@ export default function TicTacNo() {
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Last move hint */}
-        <div className="px-4 pb-1 shrink-0 h-5">
-          {lastMove && (
-            <p className="text-xs text-yellow-400/70 truncate">{lastMove.player}: {lastMove.action}</p>
-          )}
-        </div>
-
-        {/* Board */}
-        <div className="flex-1 flex items-center justify-center min-h-0 px-3">
-          <div className="aspect-square" style={{ width: 'min(calc(100vw - 24px), calc(100dvh - 260px))' }}>
+          <div className="aspect-square" style={{ width: 'min(calc(100vw - 24px), calc(100dvh - 310px))' }}>
             <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full">
               {board.map((cell, idx) => {
                 const isSelected = selectedCell === idx;
