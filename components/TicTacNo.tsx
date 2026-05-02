@@ -612,30 +612,35 @@ export default function TicTacNo() {
         })()}
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 pb-2 shrink-0" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
-          <button onClick={resetGame} disabled={isGenerating}
-            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-            <ArrowLeft size={18} />
-          </button>
-          <div className="flex gap-2 items-center">
+        <div className="shrink-0 px-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+          {/* Back + Restart row */}
+          <div className="flex items-center justify-between mb-2">
+            <button onClick={resetGame} disabled={isGenerating}
+              className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+              <ArrowLeft size={18} />
+            </button>
+            <button onClick={restartGame} disabled={isGenerating}
+              className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+              <RotateCcw size={16} />
+            </button>
+          </div>
+          {/* Player indicators row */}
+          <div className="flex gap-2 pb-2">
             {players.map((player, i) => (
               <div key={i}
-                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center font-bold text-xs transition-all"
+                className="flex-1 rounded-lg flex flex-col items-center justify-center py-2 font-bold transition-all"
                 style={{
                   backgroundColor: player.color,
                   opacity: currentPlayer === i ? 1 : 0.35,
                   boxShadow: currentPlayer === i ? `0 0 12px ${player.color}` : 'none',
-                  transform: currentPlayer === i ? 'scale(1.1)' : 'scale(1)',
+                  transform: currentPlayer === i ? 'scale(1.03)' : 'scale(1)',
                 }}>
                 <span className="text-white text-xs font-black">P{i + 1}</span>
-                <span className="text-white/80 text-[9px]">{player.isAI ? 'AI' : 'YOU'}</span>
+                <span className="text-white font-bold text-xs truncate w-full text-center px-1">{player.name}</span>
+                <span className="text-white/70 text-[9px]">{player.isAI ? 'AI' : 'YOU'}</span>
               </div>
             ))}
           </div>
-          <button onClick={restartGame} disabled={isGenerating}
-            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-            <RotateCcw size={16} />
-          </button>
         </div>
 
         {/* Last move hint */}
