@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tic Tac No",
+  title: "Tic Attack Toe",
   description: "Battle with anything you can imagine",
   other: {
     'viewport': 'width=device-width, initial-scale=1, viewport-fit=cover',

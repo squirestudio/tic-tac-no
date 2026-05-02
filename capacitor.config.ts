@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.squirestudio.tictacno',
-  appName: 'Tic Tac No',
+  appId: 'com.squirestudio.tictacattoe',
+  appName: 'Tic Attack Toe',
   webDir: 'out'
 };
 
