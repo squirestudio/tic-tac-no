@@ -617,7 +617,7 @@ export default function TicTacNo() {
             className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
             <ArrowLeft size={18} />
           </button>
-          <img src="/logo.png" alt="Tic Attack Toe" className="h-14" />
+          <img src="/logo.png" alt="Tic Attack Toe" className="h-24" />
           <button onClick={restartGame} disabled={isGenerating}
             className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
             <RotateCcw size={16} />
