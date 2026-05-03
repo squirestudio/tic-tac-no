@@ -291,6 +291,7 @@ export default function TicTacNo() {
   });
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [myRPDelta, setMyRPDelta] = useState<number | null>(null);
+  const [setupStep, setSetupStep] = useState<'mode' | 'config'>('mode');
 
   // Fetch global leaderboard on mount and when leaderboard modal opens
   const fetchLeaderboard = useCallback(async () => {
@@ -723,6 +724,7 @@ export default function TicTacNo() {
     setBattleNarrative('');
     setLastMove(null);
     setMyRPDelta(null);
+    setSetupStep('mode');
     pendingContinuationRef.current = null;
     usedWordsRef.current = new Set();
     pendingImages.current = new Set();
@@ -1116,110 +1118,139 @@ export default function TicTacNo() {
       <div className="h-[100dvh] bg-cover bg-center bg-no-repeat flex flex-col justify-end px-4"
         style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))', paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto w-full">
-          <div className={`bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl border border-purple-500/30 transition-opacity duration-700 flex flex-col max-h-[68vh] ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
-            {/* Fixed header */}
-            <div className="shrink-0 px-5 pt-5 pb-3">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-bold text-white">Configure Players</h2>
-                <div className="flex gap-2">
-                  <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-xl">🏆</button>
-                  <button onClick={() => {
-                    setPsGamertag(profile?.gamertag ?? '');
-                    setPsAvatarWord(profile?.avatarWord ?? '');
-                    setPsAvatarUrl(profile?.avatarUrl ?? '');
-                    setShowProfileSetup(true);
-                  }} className="text-xl">⚙️</button>
-                </div>
-              </div>
-              {profile && (
-                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/5 border border-white/10">
-                  {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-8 h-8 rounded-full object-cover border-2 border-purple-400" />}
-                  <div>
-                    <p className="text-white font-bold text-sm">{profile.gamertag}</p>
-                    <p className="text-white/40 text-xs">Your profile</p>
-                  </div>
-                </div>
-              )}
-            </div>
-            {/* Scrollable player list */}
-            <div className="overflow-y-auto flex-1 px-5">
-            <div className="space-y-3 pb-2">
-              {players.map((player, idx) => (
-                <div key={idx} className="p-4 rounded-xl"
-                  style={{ background: `linear-gradient(135deg, ${player.color}20, ${player.color}10)`, border: `2px solid ${player.color}40` }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <input
-                      type="text"
-                      value={player.name}
-                      onChange={e => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, name: e.target.value } : p))}
-                      className="text-lg font-bold text-white bg-transparent border-b-2 border-purple-400 outline-none flex-1"
-                    />
-                    <label className="flex items-center gap-3 cursor-pointer ml-4">
-                      <input
-                        type="checkbox"
-                        checked={player.isAI}
-                        onChange={e => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, isAI: e.target.checked } : p))}
-                        className="w-5 h-5 cursor-pointer"
-                      />
-                      <span className="font-semibold text-white">AI</span>
-                    </label>
-                  </div>
-                  {player.isAI && (
-                    <div className="flex gap-2 mt-1">
-                      {(['easy', 'medium', 'hard'] as const).map(level => (
-                        <button key={level} onClick={() => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, difficulty: level } : p))}
-                          className={`flex-1 py-1.5 rounded-lg text-sm font-bold capitalize transition-all
-                            ${player.difficulty === level
-                              ? 'bg-white/20 text-white ring-2 ring-white/50'
-                              : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}>
-                          {level === 'easy' ? 'Easy' : level === 'medium' ? 'Medium' : 'Hard'}
-                        </button>
-                      ))}
+
+          {/* ── Mode selection ── */}
+          {setupStep === 'mode' && (
+            <div className={`bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl border border-purple-500/30 transition-opacity duration-700 ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
+              <div className="px-5 pt-5 pb-5 space-y-4">
+                {/* Profile row */}
+                <div className="flex items-center justify-between">
+                  {profile ? (
+                    <div className="flex items-center gap-3">
+                      {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />}
+                      <div>
+                        <p className="text-white font-bold text-sm">{profile.gamertag}</p>
+                        {(() => {
+                          const rp = leaderboard[profile.uuid]?.rp ?? 0;
+                          const rank = getRank(rp);
+                          return <p className="text-xs font-bold" style={{ color: TIER_DISPLAY[rank.tier].color }}>{TIER_DISPLAY[rank.tier].emoji} {rank.label} · {rp} RP</p>;
+                        })()}
+                      </div>
                     </div>
+                  ) : (
+                    <p className="text-white/40 text-sm">No profile</p>
                   )}
-                  {!player.isAI && (
-                    <div className="mt-2">
-                      {player.profileUUID ? (
-                        <div className="flex items-center gap-2">
-                          {player.profileAvatarUrl && <img src={player.profileAvatarUrl} alt="avatar" className="w-6 h-6 rounded-full object-cover border border-white/30" />}
-                          <span className="text-white/60 text-xs font-bold">✓ Signed in</span>
-                          {idx !== 0 && (
-                            <button onClick={() => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, profileUUID: undefined, profileAvatarUrl: undefined } : p))}
-                              className="text-white/30 text-xs ml-auto hover:text-white/60">Sign out</button>
+                  <div className="flex gap-3">
+                    <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-xl">🏆</button>
+                    <button onClick={() => {
+                      setPsGamertag(profile?.gamertag ?? '');
+                      setPsAvatarWord(profile?.avatarWord ?? '');
+                      setPsAvatarUrl(profile?.avatarUrl ?? '');
+                      setShowProfileSetup(true);
+                    }} className="text-xl">⚙️</button>
+                  </div>
+                </div>
+                {/* Buttons */}
+                <button
+                  onClick={() => setSetupStep('config')}
+                  className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl transition-all">
+                  ⚔️ Play vs AI / Local
+                </button>
+                <button
+                  onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
+                  className="w-full py-3 bg-slate-700/80 text-white font-bold text-base rounded-xl transition-all">
+                  🌐 Multiplayer
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Player config ── */}
+          {setupStep === 'config' && (
+            <div className={`bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl border border-purple-500/30 transition-opacity duration-700 flex flex-col max-h-[68vh] ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
+              {/* Header */}
+              <div className="shrink-0 px-5 pt-4 pb-3 flex items-center gap-3">
+                <button onClick={() => setSetupStep('mode')} className="text-white/50 hover:text-white p-1">
+                  ←
+                </button>
+                <h2 className="text-lg font-bold text-white">Configure Players</h2>
+              </div>
+              {/* Scrollable player list */}
+              <div className="overflow-y-auto flex-1 px-5">
+                <div className="space-y-3 pb-2">
+                  {players.map((player, idx) => (
+                    <div key={idx} className="p-4 rounded-xl"
+                      style={{ background: `linear-gradient(135deg, ${player.color}20, ${player.color}10)`, border: `2px solid ${player.color}40` }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <input
+                          type="text"
+                          value={player.name}
+                          onChange={e => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, name: e.target.value } : p))}
+                          className="text-lg font-bold text-white bg-transparent border-b-2 border-purple-400 outline-none flex-1"
+                        />
+                        <label className="flex items-center gap-3 cursor-pointer ml-4">
+                          <input
+                            type="checkbox"
+                            checked={player.isAI}
+                            onChange={e => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, isAI: e.target.checked } : p))}
+                            className="w-5 h-5 cursor-pointer"
+                          />
+                          <span className="font-semibold text-white">AI</span>
+                        </label>
+                      </div>
+                      {player.isAI && (
+                        <div className="flex gap-2 mt-1">
+                          {(['easy', 'medium', 'hard'] as const).map(level => (
+                            <button key={level} onClick={() => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, difficulty: level } : p))}
+                              className={`flex-1 py-1.5 rounded-lg text-sm font-bold capitalize transition-all
+                                ${player.difficulty === level
+                                  ? 'bg-white/20 text-white ring-2 ring-white/50'
+                                  : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}>
+                              {level === 'easy' ? 'Easy' : level === 'medium' ? 'Medium' : 'Hard'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {!player.isAI && (
+                        <div className="mt-2">
+                          {player.profileUUID ? (
+                            <div className="flex items-center gap-2">
+                              {player.profileAvatarUrl && <img src={player.profileAvatarUrl} alt="avatar" className="w-6 h-6 rounded-full object-cover border border-white/30" />}
+                              <span className="text-white/60 text-xs font-bold">✓ Signed in</span>
+                              {idx !== 0 && (
+                                <button onClick={() => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, profileUUID: undefined, profileAvatarUrl: undefined } : p))}
+                                  className="text-white/30 text-xs ml-auto hover:text-white/60">Sign out</button>
+                              )}
+                            </div>
+                          ) : (
+                            <button onClick={() => { setSigningInIdx(idx); setSiGamertag(''); setSiPin(''); setSiError(''); setShowSignIn(true); }}
+                              className="text-xs font-bold text-purple-400 hover:text-purple-300">
+                              + Sign in to track stats
+                            </button>
                           )}
                         </div>
-                      ) : (
-                        <button onClick={() => { setSigningInIdx(idx); setSiGamertag(''); setSiPin(''); setSiError(''); setShowSignIn(true); }}
-                          className="text-xs font-bold text-purple-400 hover:text-purple-300">
-                          + Sign in to track stats
-                        </button>
                       )}
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              </div>
+              {/* Play button footer */}
+              <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/10">
+                <button
+                  onClick={() => {
+                    const emptyBoard = Array(9).fill(null);
+                    setBoard(emptyBoard);
+                    setPlayers(prev => prev.map(p => p.isAI ? { ...p, name: pickAIName(p.difficulty) } : p));
+                    setGamePhase('playing');
+                    if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
+                  }}
+                  className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl transition-all">
+                  Play
+                </button>
+              </div>
             </div>
-            </div>{/* end scrollable */}
-            {/* Fixed Play button footer */}
-            <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/10 space-y-2">
-            <button
-              onClick={() => {
-                const emptyBoard = Array(9).fill(null);
-                setBoard(emptyBoard);
-                setPlayers(prev => prev.map(p => p.isAI ? { ...p, name: pickAIName(p.difficulty) } : p));
-                setGamePhase('playing');
-                if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
-              }}
-              className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl hover:shadow-2xl transition-all">
-              Play vs AI / Local
-            </button>
-            <button
-              onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
-              className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-base rounded-xl transition-all">
-              🌐 Multiplayer
-            </button>
-            </div>
-          </div>
+          )}
+
         </div>
       </div>
 
