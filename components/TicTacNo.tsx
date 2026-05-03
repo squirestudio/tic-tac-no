@@ -18,6 +18,8 @@ type BattleAnimation = {
   defenderOwner: number;
   winner: string;
 };
+type PlayerStats = { wins: number; gamesPlayed: number; totalPoints: number };
+type LeaderboardData = { [name: string]: PlayerStats };
 
 const AI_NAMES = {
   easy:   ['Kai', 'Tailor', 'Aiko'],
@@ -119,6 +121,31 @@ function findOptimalSpot(board: Cell[], playerIndex: number, allPlayers: Player[
 
 const WIN_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 
+const LEADERBOARD_KEY = 'tat_leaderboard';
+
+function getWinPoints(players: Player[]) {
+  const aiDiffs = players.filter(p => p.isAI).map(p => p.difficulty);
+  if (aiDiffs.includes('hard')) return 3;
+  if (aiDiffs.includes('medium')) return 2;
+  if (aiDiffs.length > 0) return 1;
+  return 1;
+}
+
+function getTier(stats: PlayerStats): 'bronze' | 'silver' | 'gold' | null {
+  const { gamesPlayed, totalPoints } = stats;
+  if (gamesPlayed < 10) return null;
+  const ppg = totalPoints / gamesPlayed;
+  if (gamesPlayed >= 50 && ppg >= 1.5) return 'gold';
+  if (gamesPlayed >= 25 && ppg >= 1.0) return 'silver';
+  return 'bronze';
+}
+
+const TIER_DISPLAY = {
+  gold:   { emoji: '🥇', label: 'Gold',   color: '#FFD700' },
+  silver: { emoji: '🥈', label: 'Silver', color: '#C0C0C0' },
+  bronze: { emoji: '🥉', label: 'Bronze', color: '#CD7F32' },
+};
+
 function checkWinner(board: Cell[]) {
   for (const [a, b, c] of WIN_LINES) {
     if (board[a] && board[b] && board[c] &&
@@ -199,6 +226,32 @@ export default function TicTacNo() {
       } catch {}
     })();
   }, [gamePhase]);
+
+  const [leaderboard, setLeaderboard] = useState<LeaderboardData>(() => {
+    try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY) ?? '{}'); }
+    catch { return {}; }
+  });
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  useEffect(() => {
+    if (gamePhase !== 'gameOver' || winner === null) return;
+    const pts = getWinPoints(players);
+    setLeaderboard(prev => {
+      const next = { ...prev };
+      players.forEach((p, idx) => {
+        if (p.isAI) return;
+        const s = next[p.name] ?? { wins: 0, gamesPlayed: 0, totalPoints: 0 };
+        next[p.name] = {
+          wins: s.wins + (idx === winner ? 1 : 0),
+          gamesPlayed: s.gamesPlayed + 1,
+          totalPoints: s.totalPoints + (idx === winner ? pts : 0),
+        };
+      });
+      try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase, winner]);
 
   const CACHE_KEY = 'ttn_image_cache';
   const [imageCache, setImageCache] = useState<Record<string, string>>(() => {
@@ -502,11 +555,15 @@ export default function TicTacNo() {
   // ── Setup ──────────────────────────────────────────────────────────────────
   if (gamePhase === 'setup') {
     return (
+      <>
       <div className="min-h-screen bg-cover bg-center bg-no-repeat flex flex-col justify-end p-6"
         style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))', paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto w-full">
           <div className={`bg-slate-900/40 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30 transition-opacity duration-700 ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
-            <h2 className="text-2xl font-bold text-white mb-6">Configure Players</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">Configure Players</h2>
+              <button onClick={() => setShowLeaderboard(true)} className="text-2xl">🏆</button>
+            </div>
             <div className="space-y-4 mb-8">
               {players.map((player, idx) => (
                 <div key={idx} className="p-4 rounded-xl"
@@ -558,6 +615,71 @@ export default function TicTacNo() {
           </div>
         </div>
       </div>
+
+      {showLeaderboard && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => setShowLeaderboard(false)}>
+          <div className="bg-slate-900 rounded-2xl shadow-2xl p-6 border border-purple-500/30 w-full max-w-md"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-black text-white">🏆 Leaderboard</h2>
+              <button onClick={() => setShowLeaderboard(false)} className="text-white/50 hover:text-white text-2xl leading-none">×</button>
+            </div>
+            {(() => {
+              const entries = Object.entries(leaderboard)
+                .map(([name, stats]) => ({ name, stats, tier: getTier(stats) }))
+                .sort((a, b) => {
+                  const tierOrder = { gold: 3, silver: 2, bronze: 1, null: 0 };
+                  const ta = tierOrder[a.tier ?? 'null'];
+                  const tb = tierOrder[b.tier ?? 'null'];
+                  if (ta !== tb) return tb - ta;
+                  const ppgA = a.stats.gamesPlayed > 0 ? a.stats.totalPoints / a.stats.gamesPlayed : 0;
+                  const ppgB = b.stats.gamesPlayed > 0 ? b.stats.totalPoints / b.stats.gamesPlayed : 0;
+                  return ppgB - ppgA;
+                });
+              if (entries.length === 0) return (
+                <p className="text-white/50 text-center py-8">No ranked players yet.<br/>Play 10 games to appear here.</p>
+              );
+              return (
+                <div className="space-y-3">
+                  {entries.map(({ name, stats, tier }, i) => {
+                    const ppg = stats.gamesPlayed > 0 ? (stats.totalPoints / stats.gamesPlayed).toFixed(1) : '0.0';
+                    const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
+                    const gamesLeft = Math.max(0, 10 - stats.gamesPlayed);
+                    return (
+                      <div key={name} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                        <span className="text-white/40 font-bold w-5 text-sm">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-bold truncate">{name}</span>
+                            {tier && <span className="text-sm">{TIER_DISPLAY[tier].emoji}</span>}
+                          </div>
+                          <div className="text-white/50 text-xs mt-0.5">
+                            {tier
+                              ? `${stats.gamesPlayed} games · ${winPct}% wins · ${ppg} pts/game`
+                              : gamesLeft > 0
+                                ? `${stats.gamesPlayed} games · ${gamesLeft} more to rank`
+                                : `${stats.gamesPlayed} games · ${winPct}% wins`}
+                          </div>
+                        </div>
+                        {tier && (
+                          <span className="text-xs font-bold shrink-0" style={{ color: TIER_DISPLAY[tier].color }}>
+                            {TIER_DISPLAY[tier].label}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <p className="text-white/30 text-xs text-center pt-2">
+                    🥉 Bronze: 10+ games · 🥈 Silver: 25+ games, 1.0 pts/game · 🥇 Gold: 50+ games, 1.5 pts/game
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+      </>
     );
   }
 
@@ -759,11 +881,29 @@ export default function TicTacNo() {
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4">
             VICTORY!
           </h1>
-          <div className="inline-block px-8 py-6 rounded-2xl text-white text-2xl font-bold mb-8 shadow-2xl"
+          <div className="inline-block px-8 py-6 rounded-2xl text-white text-2xl font-bold mb-4 shadow-2xl"
             style={{ backgroundColor: winnerPlayer.color, boxShadow: `0 0 40px ${winnerPlayer.color}80` }}>
             <Crown className="inline mr-2" size={28} />
             {winnerPlayer.name}
           </div>
+          {(() => {
+            if (winnerPlayer.isAI) return null;
+            const stats = leaderboard[winnerPlayer.name];
+            if (!stats || stats.gamesPlayed < 10) return (
+              <p className="text-white/40 text-sm mb-6">
+                {stats ? `${Math.max(0, 10 - stats.gamesPlayed)} more games to rank` : '10 more games to rank'}
+              </p>
+            );
+            const tier = getTier(stats);
+            const ppg = (stats.totalPoints / stats.gamesPlayed).toFixed(1);
+            const winPct = Math.round((stats.wins / stats.gamesPlayed) * 100);
+            return (
+              <div className="mb-6 p-3 rounded-xl bg-white/10 border border-white/20 text-center">
+                {tier && <p className="text-2xl mb-1">{TIER_DISPLAY[tier].emoji} <span className="font-bold" style={{ color: TIER_DISPLAY[tier].color }}>{TIER_DISPLAY[tier].label}</span></p>}
+                <p className="text-white/60 text-xs">{stats.gamesPlayed} games · {winPct}% wins · {ppg} pts/game</p>
+              </div>
+            );
+          })()}
           <button
             onClick={async () => {
               gamesPlayedRef.current += 1;
