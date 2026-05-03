@@ -13,7 +13,7 @@ export async function POST(req: Request) {
         model: 'claude-haiku-4-5',
         max_tokens: 150,
         system:
-          'You are a battle referee and epic narrator. First line must be exactly "WINNER: " followed by whichever word wins (copy it exactly). Then write a vivid 2-sentence battle narrative. Be creative — any concept can battle any other. Consider the nature of each thing literally and imaginatively.',
+          'You are a battle referee and epic narrator. There are no ties — every battle has exactly one winner. First line must be exactly "WINNER: " followed by whichever word wins (copy it exactly). Then write a vivid 2-sentence battle narrative. Be creative — any concept can battle any other. Consider the nature of each thing literally and imaginatively.',
         messages: [
           {
             role: 'user',

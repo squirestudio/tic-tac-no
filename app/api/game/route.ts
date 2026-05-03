@@ -76,7 +76,7 @@ async function resolveBattle(challenger: string, defender: string): Promise<{ wi
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 200,
-      system: 'You are a battle referee and epic narrator. First line must be exactly "WINNER: " followed by whichever word wins (copy it exactly). Then write a vivid 2-sentence battle narrative. Be creative — any concept can battle any other. Consider the nature of each thing literally and imaginatively.',
+      system: 'You are a battle referee and epic narrator. There are no ties — every battle has exactly one winner. First line must be exactly "WINNER: " followed by whichever word wins (copy it exactly). Then write a vivid 2-sentence battle narrative. Be creative — any concept can battle any other. Consider the nature of each thing literally and imaginatively.',
       messages: [{ role: 'user', content: `Battle: "${challenger}" vs "${defender}". Who wins? Declare the winner and narrate dramatically.` }],
     });
     const text = msg.content[0].type === 'text' ? msg.content[0].text : '';
@@ -207,8 +207,7 @@ export async function POST(req: Request) {
       } else {
         const existing = board[index]!;
         const { winner: battleWinner, narrative } = await resolveBattle(object, existing.object);
-        const challengerWon = battleWinner.toLowerCase().includes(object.toLowerCase()) ||
-          battleWinner.toLowerCase() === object.toLowerCase();
+        const challengerWon = battleWinner.toLowerCase() === object.toLowerCase();
         if (challengerWon) board[index] = newCell;
         lastMove = {
           slot,

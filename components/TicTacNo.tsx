@@ -631,7 +631,7 @@ export default function TicTacNo() {
         });
 
         fetchBattleNarrative(object, existing.object, (winnerWord) => {
-          const challengerWon = winnerWord.toLowerCase() === object.toLowerCase() || winnerWord.toLowerCase() === 'tie';
+          const challengerWon = winnerWord.toLowerCase() === object.toLowerCase();
           const newBoard = [...currentBoard];
           if (challengerWon) newBoard[index] = newCell;
           setBoard(newBoard);
