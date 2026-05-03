@@ -778,32 +778,37 @@ export default function TicTacNo() {
   if (gamePhase === 'setup') {
     return (
       <>
-      <div className="min-h-screen bg-cover bg-center bg-no-repeat flex flex-col justify-end p-6"
-        style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))', paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
+      <div className="h-[100dvh] bg-cover bg-center bg-no-repeat flex flex-col justify-end px-4"
+        style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))', paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto w-full">
-          <div className={`bg-slate-900/40 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30 transition-opacity duration-700 ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Configure Players</h2>
-              <div className="flex gap-2">
-                <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-2xl">🏆</button>
-                <button onClick={() => {
-                  setPsGamertag(profile?.gamertag ?? '');
-                  setPsAvatarWord(profile?.avatarWord ?? '');
-                  setPsAvatarUrl(profile?.avatarUrl ?? '');
-                  setShowProfileSetup(true);
-                }} className="text-2xl">⚙️</button>
-              </div>
-            </div>
-            {profile && (
-              <div className="flex items-center gap-3 mb-6 p-3 rounded-xl bg-white/5 border border-white/10">
-                {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />}
-                <div>
-                  <p className="text-white font-bold text-sm">{profile.gamertag}</p>
-                  <p className="text-white/40 text-xs">Your profile</p>
+          <div className={`bg-slate-900/70 backdrop-blur-sm rounded-2xl shadow-2xl border border-purple-500/30 transition-opacity duration-700 flex flex-col max-h-[68vh] ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
+            {/* Fixed header */}
+            <div className="shrink-0 px-5 pt-5 pb-3">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xl font-bold text-white">Configure Players</h2>
+                <div className="flex gap-2">
+                  <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-xl">🏆</button>
+                  <button onClick={() => {
+                    setPsGamertag(profile?.gamertag ?? '');
+                    setPsAvatarWord(profile?.avatarWord ?? '');
+                    setPsAvatarUrl(profile?.avatarUrl ?? '');
+                    setShowProfileSetup(true);
+                  }} className="text-xl">⚙️</button>
                 </div>
               </div>
-            )}
-            <div className="space-y-4 mb-8">
+              {profile && (
+                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/5 border border-white/10">
+                  {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-8 h-8 rounded-full object-cover border-2 border-purple-400" />}
+                  <div>
+                    <p className="text-white font-bold text-sm">{profile.gamertag}</p>
+                    <p className="text-white/40 text-xs">Your profile</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Scrollable player list */}
+            <div className="overflow-y-auto flex-1 px-5">
+            <div className="space-y-3 pb-2">
               {players.map((player, idx) => (
                 <div key={idx} className="p-4 rounded-xl"
                   style={{ background: `linear-gradient(135deg, ${player.color}20, ${player.color}10)`, border: `2px solid ${player.color}40` }}>
@@ -859,6 +864,9 @@ export default function TicTacNo() {
                 </div>
               ))}
             </div>
+            </div>{/* end scrollable */}
+            {/* Fixed Play button footer */}
+            <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/10">
             <button
               onClick={() => {
                 const emptyBoard = Array(9).fill(null);
@@ -870,6 +878,7 @@ export default function TicTacNo() {
               className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl hover:shadow-2xl transition-all">
               Play
             </button>
+            </div>
           </div>
         </div>
       </div>
