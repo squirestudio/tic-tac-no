@@ -8,23 +8,27 @@ const redis =
     : null;
 
 const PLAYERS_SET = 'lb:players';
-const playerKey = (name: string) => `lb:${name}`;
+const playerKey = (uuid: string) => `lb:${uuid}`;
 
 export async function POST(req: Request) {
   if (!redis) return Response.json({});
 
-  const body = await req.json() as { action: 'fetch' } | { action: 'update'; name: string; won: boolean; points: number };
+  const body = await req.json() as
+    | { action: 'fetch' }
+    | { action: 'update'; uuid: string; gamertag: string; avatarUrl: string; won: boolean; points: number };
 
   if (body.action === 'fetch') {
-    const names = await redis.smembers<string[]>(PLAYERS_SET);
-    if (!names || names.length === 0) return Response.json({});
+    const uuids = await redis.smembers<string[]>(PLAYERS_SET);
+    if (!uuids || uuids.length === 0) return Response.json({});
 
     const entries = await Promise.all(
-      names.map(async name => {
-        const data = await redis!.hgetall(playerKey(name));
+      uuids.map(async uuid => {
+        const data = await redis!.hgetall(playerKey(uuid));
         if (!data) return null;
         return {
-          name,
+          uuid,
+          gamertag: String(data.gamertag ?? ''),
+          avatarUrl: String(data.avatarUrl ?? ''),
           wins: parseInt(String(data.wins ?? '0')),
           gamesPlayed: parseInt(String(data.gamesPlayed ?? '0')),
           totalPoints: parseInt(String(data.totalPoints ?? '0')),
@@ -32,21 +36,22 @@ export async function POST(req: Request) {
       })
     );
 
-    const result: Record<string, { wins: number; gamesPlayed: number; totalPoints: number }> = {};
+    const result: Record<string, { gamertag: string; avatarUrl: string; wins: number; gamesPlayed: number; totalPoints: number }> = {};
     for (const entry of entries) {
-      if (entry && entry.gamesPlayed > 0) result[entry.name] = entry;
+      if (entry && entry.gamesPlayed > 0) result[entry.uuid] = entry;
     }
     return Response.json(result);
   }
 
   if (body.action === 'update') {
-    const { name, won, points } = body;
-    if (!name || typeof won !== 'boolean' || typeof points !== 'number') {
+    const { uuid, gamertag, avatarUrl, won, points } = body;
+    if (!uuid || !gamertag || typeof won !== 'boolean' || typeof points !== 'number') {
       return Response.json({ error: 'invalid' }, { status: 400 });
     }
-    const key = playerKey(name);
+    const key = playerKey(uuid);
     await Promise.all([
-      redis.sadd(PLAYERS_SET, name),
+      redis.sadd(PLAYERS_SET, uuid),
+      redis.hset(key, { gamertag, avatarUrl }),
       redis.hincrby(key, 'gamesPlayed', 1),
       won ? redis.hincrby(key, 'wins', 1) : Promise.resolve(0),
       won ? redis.hincrby(key, 'totalPoints', points) : Promise.resolve(0),

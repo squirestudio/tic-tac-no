@@ -18,8 +18,9 @@ type BattleAnimation = {
   defenderOwner: number;
   winner: string;
 };
-type PlayerStats = { wins: number; gamesPlayed: number; totalPoints: number };
-type LeaderboardData = { [name: string]: PlayerStats };
+type PlayerStats = { wins: number; gamesPlayed: number; totalPoints: number; gamertag: string; avatarUrl: string };
+type LeaderboardData = { [uuid: string]: PlayerStats };
+type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string };
 
 const AI_NAMES = {
   easy:   ['Kai', 'Tailor', 'Aiko'],
@@ -122,6 +123,12 @@ function findOptimalSpot(board: Cell[], playerIndex: number, allPlayers: Player[
 const WIN_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 
 const LEADERBOARD_KEY = 'tat_leaderboard';
+const PROFILE_KEY = 'tat_profile';
+
+function generateUUID() {
+  try { return crypto.randomUUID(); }
+  catch { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+}
 
 function getWinPoints(players: Player[]) {
   const aiDiffs = players.filter(p => p.isAI).map(p => p.difficulty);
@@ -227,6 +234,16 @@ export default function TicTacNo() {
     })();
   }, [gamePhase]);
 
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? 'null'); }
+    catch { return null; }
+  });
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [psGamertag, setPsGamertag] = useState('');
+  const [psAvatarWord, setPsAvatarWord] = useState('');
+  const [psAvatarUrl, setPsAvatarUrl] = useState('');
+  const [psGenerating, setPsGenerating] = useState(false);
+
   const [leaderboard, setLeaderboard] = useState<LeaderboardData>(() => {
     try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY) ?? '{}'); }
     catch { return {}; }
@@ -251,34 +268,36 @@ export default function TicTacNo() {
   useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
 
   useEffect(() => {
+    if (!profile) setShowProfileSetup(true);
+  }, [profile]);
+
+  useEffect(() => {
     if (gamePhase !== 'gameOver' || winner === null) return;
     const pts = getWinPoints(players);
 
-    // Post each human player's result to the global leaderboard
-    players.forEach((p, idx) => {
-      if (p.isAI) return;
+    // Post result for the profile holder (device owner)
+    const humanPlayed = players.some(p => !p.isAI);
+    if (profile && humanPlayed) {
+      const humanWon = winner !== null && !players[winner].isAI;
       fetch(`${API}/api/leaderboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update', name: p.name, won: idx === winner, points: pts }),
+        body: JSON.stringify({ action: 'update', uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl, won: humanWon, points: pts }),
       }).then(() => fetchLeaderboard()).catch(() => {});
-    });
 
-    // Optimistically update local state and localStorage
-    setLeaderboard(prev => {
-      const next = { ...prev };
-      players.forEach((p, idx) => {
-        if (p.isAI) return;
-        const s = next[p.name] ?? { wins: 0, gamesPlayed: 0, totalPoints: 0 };
-        next[p.name] = {
-          wins: s.wins + (idx === winner ? 1 : 0),
+      // Optimistically update local state
+      setLeaderboard(prev => {
+        const s = prev[profile.uuid] ?? { wins: 0, gamesPlayed: 0, totalPoints: 0, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl };
+        const next = { ...prev, [profile.uuid]: {
+          ...s,
+          wins: s.wins + (humanWon ? 1 : 0),
           gamesPlayed: s.gamesPlayed + 1,
-          totalPoints: s.totalPoints + (idx === winner ? pts : 0),
-        };
+          totalPoints: s.totalPoints + (humanWon ? pts : 0),
+        }};
+        try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
+        return next;
       });
-      try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase, winner]);
 
@@ -581,6 +600,110 @@ export default function TicTacNo() {
     placePiece(selectedCell, word, currentPlayer, board);
   }, [objectInput, isGenerating, selectedCell, currentPlayer, board, placePiece]);
 
+  // ── Profile Setup ──────────────────────────────────────────────────────────
+  if (showProfileSetup) {
+    const isEdit = !!profile;
+    const canSave = psGamertag.trim().length > 0 && psAvatarUrl.length > 0;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6"
+        style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+        <div className="w-full max-w-sm">
+          <img src="/logo.png" alt="Tic Attack Toe" className="h-28 mx-auto mb-8" />
+          <h2 className="text-2xl font-black text-white text-center mb-1">{isEdit ? 'Edit Profile' : 'Create Your Profile'}</h2>
+          <p className="text-white/40 text-sm text-center mb-8">{isEdit ? 'Update your gamertag and avatar' : 'Set up your gamertag and battle avatar'}</p>
+
+          <div className="space-y-4">
+            <div>
+              <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">Gamertag</label>
+              <input
+                type="text"
+                value={psGamertag}
+                onChange={e => setPsGamertag(e.target.value)}
+                placeholder="Enter your gamertag"
+                maxLength={20}
+                style={{ fontSize: '16px' }}
+                className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">Avatar Word</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={psAvatarWord}
+                  onChange={e => { setPsAvatarWord(e.target.value); setPsAvatarUrl(''); }}
+                  placeholder="e.g. dragon, phoenix, robot"
+                  maxLength={24}
+                  style={{ fontSize: '16px' }}
+                  className="flex-1 bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500"
+                />
+                <button
+                  onClick={async () => {
+                    if (!psAvatarWord.trim() || psGenerating) return;
+                    setPsGenerating(true);
+                    try {
+                      const res = await fetch(`${API}/api/generate-image`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ word: psAvatarWord.trim() }),
+                      });
+                      const data = await res.json();
+                      if (data.url) setPsAvatarUrl(data.url);
+                    } catch {}
+                    setPsGenerating(false);
+                  }}
+                  disabled={!psAvatarWord.trim() || psGenerating}
+                  className="bg-purple-600 text-white font-bold px-4 rounded-xl disabled:opacity-50 shrink-0">
+                  {psGenerating ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : '⚡'}
+                </button>
+              </div>
+            </div>
+
+            {psAvatarUrl ? (
+              <div className="flex justify-center">
+                <div className="w-28 h-28 rounded-2xl overflow-hidden border-4 border-purple-400 shadow-lg shadow-purple-500/30">
+                  <img src={psAvatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-center">
+                <div className="w-28 h-28 rounded-2xl border-2 border-dashed border-white/20 flex items-center justify-center">
+                  <span className="text-white/30 text-sm text-center">Generate<br/>avatar ⚡</span>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                if (!canSave) return;
+                const newProfile: Profile = {
+                  uuid: profile?.uuid ?? generateUUID(),
+                  gamertag: psGamertag.trim(),
+                  avatarWord: psAvatarWord.trim(),
+                  avatarUrl: psAvatarUrl,
+                };
+                localStorage.setItem(PROFILE_KEY, JSON.stringify(newProfile));
+                setProfile(newProfile);
+                setShowProfileSetup(false);
+              }}
+              disabled={!canSave}
+              className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl disabled:opacity-40 transition-all">
+              {isEdit ? 'Save Changes' : 'Save & Play'}
+            </button>
+
+            {isEdit && (
+              <button onClick={() => setShowProfileSetup(false)}
+                className="w-full py-3 text-white/50 font-bold text-sm">
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── Setup ──────────────────────────────────────────────────────────────────
   if (gamePhase === 'setup') {
     return (
@@ -591,8 +714,25 @@ export default function TicTacNo() {
           <div className={`bg-slate-900/40 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30 transition-opacity duration-700 ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">Configure Players</h2>
-              <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-2xl">🏆</button>
+              <div className="flex gap-2">
+                <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-2xl">🏆</button>
+                <button onClick={() => {
+                  setPsGamertag(profile?.gamertag ?? '');
+                  setPsAvatarWord(profile?.avatarWord ?? '');
+                  setPsAvatarUrl(profile?.avatarUrl ?? '');
+                  setShowProfileSetup(true);
+                }} className="text-2xl">⚙️</button>
+              </div>
             </div>
+            {profile && (
+              <div className="flex items-center gap-3 mb-6 p-3 rounded-xl bg-white/5 border border-white/10">
+                {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />}
+                <div>
+                  <p className="text-white font-bold text-sm">{profile.gamertag}</p>
+                  <p className="text-white/40 text-xs">Your profile</p>
+                </div>
+              </div>
+            )}
             <div className="space-y-4 mb-8">
               {players.map((player, idx) => (
                 <div key={idx} className="p-4 rounded-xl"
@@ -656,7 +796,7 @@ export default function TicTacNo() {
             </div>
             {(() => {
               const entries = Object.entries(leaderboard)
-                .map(([name, stats]) => ({ name, stats, tier: getTier(stats) }))
+                .map(([uuid, stats]) => ({ uuid, stats, tier: getTier(stats) }))
                 .sort((a, b) => {
                   const tierOrder = { gold: 3, silver: 2, bronze: 1, null: 0 };
                   const ta = tierOrder[a.tier ?? 'null'];
@@ -670,24 +810,29 @@ export default function TicTacNo() {
                 <p className="text-white/50 text-center py-8">No ranked players yet.<br/>Play 10 games to appear here.</p>
               );
               return (
-                <div className="space-y-3">
-                  {entries.map(({ name, stats, tier }, i) => {
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {entries.map(({ uuid, stats, tier }, i) => {
                     const ppg = stats.gamesPlayed > 0 ? (stats.totalPoints / stats.gamesPlayed).toFixed(1) : '0.0';
                     const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
                     const gamesLeft = Math.max(0, 10 - stats.gamesPlayed);
+                    const isMe = uuid === profile?.uuid;
                     return (
-                      <div key={name} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
-                        <span className="text-white/40 font-bold w-5 text-sm">{i + 1}</span>
+                      <div key={uuid} className={`flex items-center gap-3 p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
+                        <span className="text-white/40 font-bold w-5 text-sm shrink-0">{i + 1}</span>
+                        {stats.avatarUrl
+                          ? <img src={stats.avatarUrl} alt={stats.gamertag} className="w-10 h-10 rounded-full object-cover border-2 border-white/20 shrink-0" />
+                          : <div className="w-10 h-10 rounded-full bg-slate-700 shrink-0" />}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-white font-bold truncate">{name}</span>
-                            {tier && <span className="text-sm">{TIER_DISPLAY[tier].emoji}</span>}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-white font-bold truncate">{stats.gamertag || 'Unknown'}</span>
+                            {isMe && <span className="text-purple-400 text-xs font-bold shrink-0">YOU</span>}
+                            {tier && <span className="text-sm shrink-0">{TIER_DISPLAY[tier].emoji}</span>}
                           </div>
                           <div className="text-white/50 text-xs mt-0.5">
                             {tier
                               ? `${stats.gamesPlayed} games · ${winPct}% wins · ${ppg} pts/game`
                               : gamesLeft > 0
-                                ? `${stats.gamesPlayed} games · ${gamesLeft} more to rank`
+                                ? `${stats.gamesPlayed} games · ${gamesLeft} to rank`
                                 : `${stats.gamesPlayed} games · ${winPct}% wins`}
                           </div>
                         </div>
@@ -916,8 +1061,8 @@ export default function TicTacNo() {
             {winnerPlayer.name}
           </div>
           {(() => {
-            if (winnerPlayer.isAI) return null;
-            const stats = leaderboard[winnerPlayer.name];
+            if (winnerPlayer.isAI || !profile) return null;
+            const stats = leaderboard[profile.uuid];
             if (!stats || stats.gamesPlayed < 10) return (
               <p className="text-white/40 text-sm mb-6">
                 {stats ? `${Math.max(0, 10 - stats.gamesPlayed)} more games to rank` : '10 more games to rank'}
