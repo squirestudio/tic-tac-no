@@ -220,6 +220,7 @@ export default function TicTacNo() {
   const lastSeenUpdatedAt = useRef(0);
   const lastShownBattleAt = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const imgRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollFailCountRef = useRef(0);
   const [mpConnectionLost, setMpConnectionLost] = useState(false);
 
@@ -425,7 +426,10 @@ export default function TicTacNo() {
 
     pollRef.current = setInterval(doPoll, 2000);
     doPoll(); // immediate first poll
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (imgRetryRef.current) clearTimeout(imgRetryRef.current);
+    };
   }, [roomCode, gameMode, syncFromRemote]);
 
   useEffect(() => {
@@ -524,8 +528,7 @@ export default function TicTacNo() {
       .catch(() => {
         clearTimeout(timeout);
         pendingImages.current.delete(key);
-        // retry once after a short delay
-        setTimeout(() => fetchImage(word), 2000);
+        imgRetryRef.current = setTimeout(() => fetchImage(word), 2000);
       });
   }, [imageCache]);
 
