@@ -26,8 +26,8 @@ export async function POST(req: Request) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      prompt: `${word} as a battle fighter, cartoon illustration, bold vibrant colors, dynamic action pose, equipped with weapons or battle gear that fits its nature, explosive energy effects, white background, centered, no text`,
-      negative_prompt: 'nude, nudity, sexual, explicit, nsfw, gore, blood, violence, disturbing, inappropriate, offensive, racist, hateful, realistic, photorealistic, bland, plain, static, boring',
+      prompt: `${word}, powerful and battle-ready, cartoon illustration, bold vibrant colors, glowing energy aura, dramatic effects that reflect its true nature, white background, centered, no text`,
+      negative_prompt: 'nude, nudity, sexual, explicit, nsfw, gore, blood, violence, disturbing, inappropriate, offensive, racist, hateful, realistic, photorealistic, bland, plain, static, boring, arms, legs, hands, feet, humanoid, anthropomorphic, person, character, fortnite, human body',
       image_size: 'square_hd',
       num_inference_steps: 4,
       num_images: 1,
