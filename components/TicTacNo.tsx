@@ -1154,7 +1154,8 @@ export default function TicTacNo() {
                 <button
                   onClick={() => setSetupStep('config')}
                   className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl transition-all">
-                  Play (Local)
+                  Play
+                  <span className="block text-sm font-normal opacity-70">Local / AI</span>
                 </button>
                 <button
                   onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
