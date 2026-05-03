@@ -297,6 +297,7 @@ export default function TicTacNo() {
   const [setupStep, setSetupStep] = useState<'mode' | 'config'>('mode');
   const lbContainerRef = useRef<HTMLDivElement>(null);
   const lbUserRowRef = useRef<HTMLDivElement>(null);
+  const lbLastFetchRef = useRef<number>(0);
 
   useEffect(() => {
     if (!showLeaderboard) return;
@@ -311,7 +312,8 @@ export default function TicTacNo() {
   }, [showLeaderboard]);
 
   // Fetch global leaderboard on mount and when leaderboard modal opens
-  const fetchLeaderboard = useCallback(async () => {
+  const fetchLeaderboard = useCallback(async (force = false) => {
+    if (!force && Date.now() - lbLastFetchRef.current < 30_000) return;
     try {
       const res = await fetch(`${API}/api/leaderboard`, {
         method: 'POST',
@@ -320,6 +322,7 @@ export default function TicTacNo() {
       });
       if (!res.ok) return;
       const data: LeaderboardData = await res.json();
+      lbLastFetchRef.current = Date.now();
       setLeaderboard(data);
       try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(data)); } catch {}
     } catch {}
@@ -592,6 +595,7 @@ export default function TicTacNo() {
   const placePiece = useCallback((index: number, object: string, playerMakingMove: number, currentBoard: Cell[]) => {
     if (gamePhase !== 'playing') return;
     setIsGenerating(true);
+    setSelectedCell(null);
     fetchImage(object);
     if (currentBoard[index] !== null) fetchImage(currentBoard[index]!.object);
 
@@ -1045,7 +1049,8 @@ export default function TicTacNo() {
                   // offline — save locally anyway, will register when online
                 }
                 const newProfile: Profile = { uuid, gamertag: psGamertag.trim(), avatarWord: psAvatarWord.trim(), avatarUrl: psAvatarUrl, pinSet: true };
-                localStorage.setItem(PROFILE_KEY, JSON.stringify(newProfile));
+                try { localStorage.setItem(PROFILE_KEY, JSON.stringify(newProfile)); }
+                catch { setPsError('Profile saved to server, but could not be stored locally. Your progress will be lost when the app closes.'); }
                 setProfile(newProfile);
                 setPsPin(''); setPsConfirmPin(''); setPsSaving(false);
                 setShowProfileSetup(false);
