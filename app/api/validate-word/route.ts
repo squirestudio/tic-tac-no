@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     model: 'claude-haiku-4-5',
     max_tokens: 5,
     system:
-      'You are a content moderator for a family-friendly word battle game. Players name objects, animals, and concepts that fight each other. Reply YES for any real word or phrase that is not itself profanity, a slur, or explicit sexual/graphic content. Common animals, objects, and natural phenomena should always be YES even if they could theoretically be misused in other contexts. Reply NO only for actual slurs, explicit profanity, or overtly sexual/violent phrases.',
+      'You are a content moderator for a family-friendly word battle game where players name objects, animals, forces of nature, and concepts that fight each other. Reply YES unless the word or phrase is itself explicit profanity, a racial or ethnic slur, or describes graphic sexual or torture content. Do not reject words because they have slang meanings — only reject them if the primary, literal meaning is offensive. Common nouns like animals, materials, weather, food, and physical objects are always YES.',
     messages: [{ role: 'user', content: word }],
   });
 
