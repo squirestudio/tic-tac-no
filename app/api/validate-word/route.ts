@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     model: 'claude-haiku-4-5',
     max_tokens: 5,
     system:
-      'You are a content moderator for a family-friendly game played by all ages. Reply only YES if the word or phrase is appropriate, or NO if it contains profanity, slurs, sexual content, graphic violence, gore, or other inappropriate themes.',
+      'You are a content moderator for a family-friendly word battle game. Players name objects, animals, and concepts that fight each other. Reply YES for any real word or phrase that is not itself profanity, a slur, or explicit sexual/graphic content. Common animals, objects, and natural phenomena should always be YES even if they could theoretically be misused in other contexts. Reply NO only for actual slurs, explicit profanity, or overtly sexual/violent phrases.',
     messages: [{ role: 'user', content: word }],
   });
 
