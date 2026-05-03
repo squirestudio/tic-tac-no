@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   const data = await response.json() as { images: { url: string }[] };
   const url = data.images[0].url;
 
-  if (redis) await redis.set(key, url);
+  if (redis) await redis.set(key, url, { ex: 60 * 60 * 24 * 30 });
 
   return Response.json({ url, season: season.id });
 }
