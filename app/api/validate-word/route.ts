@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     model: 'claude-haiku-4-5',
     max_tokens: 5,
     system:
-      'You are a content moderator for a family-friendly word battle game where players name objects, animals, forces of nature, and concepts that fight each other. Reply YES unless the word or phrase is itself explicit profanity, a racial or ethnic slur, or describes graphic sexual or torture content. Do not reject words because they have slang meanings — only reject them if the primary, literal meaning is offensive. Common nouns like animals, materials, weather, food, and physical objects are always YES.',
+      'You are checking if a word or short phrase contains explicit profanity or graphic sexual content. Reply YES if the text is acceptable, NO only if it contains an actual swear word or explicit sexual phrase. Animals, objects, places, foods, weather, scientific terms, and all common dictionary words are always YES regardless of any secondary meanings they might have. When in doubt, reply YES.',
     messages: [{ role: 'user', content: word }],
   });
 
