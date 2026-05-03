@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { getCurrentSeason } from '@/lib/seasons';
 
 export const maxDuration = 30;
 
@@ -12,11 +13,12 @@ const redis =
 
 export async function POST(req: Request) {
   const { word } = await req.json();
-  const key = `img:${word.toLowerCase()}`;
+  const season = getCurrentSeason();
+  const key = `img:${season.id}:${word.toLowerCase()}`;
 
   if (redis) {
     const cached = await redis.get<string>(key);
-    if (cached) return Response.json({ url: cached });
+    if (cached) return Response.json({ url: cached, season: season.id });
   }
 
   const response = await fetch('https://fal.run/fal-ai/flux/schnell', {
@@ -26,8 +28,8 @@ export async function POST(req: Request) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      prompt: `${word} depicted as itself, not as a person or character, powerful cartoon illustration, bold vibrant colors, dramatic energy effects and aura that reflect its true nature, white background, centered, no text, no face`,
-      negative_prompt: 'nude, nudity, sexual, explicit, nsfw, gore, blood, violence, disturbing, inappropriate, offensive, racist, hateful, realistic, photorealistic, bland, plain, static, boring, arms, legs, hands, feet, humanoid, anthropomorphic, person, character, fortnite, human body, superhero, cape, costume, warrior, fighter, face, eyes, mouth',
+      prompt: `${word} ${season.promptSuffix}`,
+      negative_prompt: season.negativePrompt,
       image_size: 'square_hd',
       num_inference_steps: 4,
       num_images: 1,
@@ -45,7 +47,7 @@ export async function POST(req: Request) {
 
   if (redis) await redis.set(key, url);
 
-  return Response.json({ url });
+  return Response.json({ url, season: season.id });
 }
 
 export async function OPTIONS() {
