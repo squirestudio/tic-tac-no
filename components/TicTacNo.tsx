@@ -215,6 +215,7 @@ export default function TicTacNo() {
   const [mpLoading, setMpLoading] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const gameModeRef = useRef<'local' | 'multiplayer'>('local');
+  const gamePhaseRef = useRef<'setup' | 'playing' | 'gameOver'>('setup');
   const mySlotRef = useRef<number | null>(null);
   const roomCodeRef = useRef('');
   const lastSeenUpdatedAt = useRef(0);
@@ -346,6 +347,20 @@ export default function TicTacNo() {
 
     if (state.phase === 'waiting') {
       setMpPlayers(state.players);
+      // Rematch: host reset the game — navigate everyone back to waiting room
+      if (gamePhaseRef.current === 'gameOver') {
+        setBoard(Array(9).fill(null));
+        setWinner(null);
+        setCurrentPlayer(0);
+        setLastMove(null);
+        setBattleAnimation(null);
+        setBattleNarrative('');
+        setMyRPDelta(null);
+        pendingContinuationRef.current = null;
+        usedWordsRef.current = new Set();
+        setGamePhase('setup');
+        setMpPhase('waiting');
+      }
       return;
     }
 
@@ -453,44 +468,28 @@ export default function TicTacNo() {
     const signedInPlayers = players.filter(p => !p.isAI && p.profileUUID);
     if (signedInPlayers.length === 0) return;
 
-    const posts = signedInPlayers.map(p => {
+    const posts = signedInPlayers.map(async p => {
       const playerIdx = players.indexOf(p);
       const won = playerIdx === winner;
-      const myRP = leaderboard[p.profileUUID!]?.rp ?? 0;
-      const opponentRPs = players
+      type OppId = { ai: 'easy' | 'medium' | 'hard' } | { uuid: string };
+      const opponentIds = players
         .filter((_, i) => i !== playerIdx)
-        .map(opp => opp.isAI ? AI_RP[opp.difficulty] : (opp.profileUUID && leaderboard[opp.profileUUID] ? leaderboard[opp.profileUUID].rp : 100));
-      const rpChange = calcRPChange(won, myRP, opponentRPs);
+        .reduce<OppId[]>((acc, opp) => {
+          if (opp.isAI) acc.push({ ai: opp.difficulty as 'easy' | 'medium' | 'hard' });
+          else if (opp.profileUUID) acc.push({ uuid: opp.profileUUID });
+          return acc;
+        }, []);
 
-      if (p.profileUUID === profile?.uuid) setMyRPDelta(rpChange);
-
-      return fetch(`${API}/api/leaderboard`, {
+      const res = await fetch(`${API}/api/leaderboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, rpChange }),
+        body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, opponentIds }),
       });
+      const data = await res.json();
+      if (res.ok && p.profileUUID === profile?.uuid) setMyRPDelta(data.rpChange);
     });
 
     Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
-
-    // Optimistic local update
-    setLeaderboard(prev => {
-      const next = { ...prev };
-      signedInPlayers.forEach(p => {
-        const playerIdx = players.indexOf(p);
-        const won = playerIdx === winner;
-        const uuid = p.profileUUID!;
-        const myRP = next[uuid]?.rp ?? 0;
-        const opponentRPs = players
-          .filter((_, i) => i !== playerIdx)
-          .map(opp => opp.isAI ? AI_RP[opp.difficulty] : (opp.profileUUID && next[opp.profileUUID] ? next[opp.profileUUID].rp : 100));
-        const rpChange = calcRPChange(won, myRP, opponentRPs);
-        const s = next[uuid] ?? { wins: 0, gamesPlayed: 0, rp: 0, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '' };
-        next[uuid] = { ...s, wins: s.wins + (won ? 1 : 0), gamesPlayed: s.gamesPlayed + 1, rp: Math.max(0, myRP + rpChange) };
-      });
-      try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase, winner]);
 
@@ -858,6 +857,7 @@ export default function TicTacNo() {
 
   // Keep refs in sync with state for use in callbacks
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
+  useEffect(() => { gamePhaseRef.current = gamePhase; }, [gamePhase]);
   useEffect(() => { mySlotRef.current = mySlot; }, [mySlot]);
   useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
 
@@ -917,6 +917,31 @@ export default function TicTacNo() {
     } catch { setMpError('Connection error.'); }
     setMpLoading(false);
   }, [profile, roomCode]);
+
+  const handleRematch = useCallback(async () => {
+    if (!profile || !roomCodeRef.current) return;
+    try {
+      const res = await fetch(`${API}/api/game`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rematch', code: roomCodeRef.current, uuid: profile.uuid }),
+      });
+      if (res.ok) {
+        // Host navigates immediately; non-hosts pick it up via polling
+        setBoard(Array(9).fill(null));
+        setWinner(null);
+        setCurrentPlayer(0);
+        setLastMove(null);
+        setBattleAnimation(null);
+        setBattleNarrative('');
+        setMyRPDelta(null);
+        pendingContinuationRef.current = null;
+        usedWordsRef.current = new Set();
+        setGamePhase('setup');
+        setMpPhase('waiting');
+      }
+    } catch {}
+  }, [profile]);
 
   const leaveRoom = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -1443,7 +1468,7 @@ export default function TicTacNo() {
                     });
                     const data = await res.json();
                     if (!res.ok) {
-                      setSiError(res.status === 404 ? 'Gamertag not found.' : res.status === 401 ? 'Wrong PIN.' : 'Sign in failed.');
+                      setSiError(res.status === 404 ? 'Gamertag not found.' : res.status === 401 ? 'Wrong PIN.' : res.status === 429 ? 'Too many failed attempts — try again in 15 minutes.' : 'Sign in failed.');
                       setSiLoading(false);
                       return;
                     }
@@ -1713,24 +1738,41 @@ export default function TicTacNo() {
               </div>
             );
           })()}
-          <button
-            onClick={async () => {
-              gamesPlayedRef.current += 1;
-              if (gamesPlayedRef.current % 3 === 0 && interstitialReadyRef.current) {
-                try {
-                  const { AdMob } = await import('@capacitor-community/admob');
-                  interstitialReadyRef.current = false;
-                  await AdMob.showInterstitial();
-                  AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true })
-                    .then(() => { interstitialReadyRef.current = true; })
-                    .catch(() => {});
-                } catch {}
-              }
-              resetGame();
-            }}
-            className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
-            Play Again
-          </button>
+          {gameMode === 'multiplayer' ? (
+            <div className="space-y-3 w-full">
+              {mpIsHost ? (
+                <button onClick={handleRematch}
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
+                  Rematch
+                </button>
+              ) : (
+                <p className="text-white/40 text-sm text-center animate-pulse py-2">Waiting for host to start rematch...</p>
+              )}
+              <button onClick={resetGame}
+                className="w-full bg-slate-700 text-white font-bold py-3 rounded-xl transition-all">
+                Leave
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={async () => {
+                gamesPlayedRef.current += 1;
+                if (gamesPlayedRef.current % 3 === 0 && interstitialReadyRef.current) {
+                  try {
+                    const { AdMob } = await import('@capacitor-community/admob');
+                    interstitialReadyRef.current = false;
+                    await AdMob.showInterstitial();
+                    AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true })
+                      .then(() => { interstitialReadyRef.current = true; })
+                      .catch(() => {});
+                  } catch {}
+                }
+                resetGame();
+              }}
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
+              Play Again
+            </button>
+          )}
           {/* Space reserved for native banner ad */}
           <div className="h-[50px] mt-4" />
         </div>

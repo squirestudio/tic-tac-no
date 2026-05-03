@@ -10,6 +10,17 @@ const redis =
 const PLAYERS_SET = 'lb:players';
 const playerKey  = (uuid: string) => `lb:${uuid}`;
 const tagKey     = (tag: string)  => `lb:tag:${tag.toLowerCase()}`;
+const rlKey      = (tag: string)  => `rl:signin:${tag.toLowerCase()}`;
+
+const AI_RP = { easy: 50, medium: 200, hard: 450 } as const;
+
+function calcRPChange(won: boolean, myRP: number, opponentRPs: number[]): number {
+  if (opponentRPs.length === 0) return won ? 20 : -15;
+  const avg = opponentRPs.reduce((a, b) => a + b, 0) / opponentRPs.length;
+  const diff = avg - myRP;
+  if (won) return Math.max(10, Math.min(60, Math.round(25 + diff / 10)));
+  return -Math.max(5, Math.min(50, Math.round(20 - diff / 10)));
+}
 
 function generateSalt(): string {
   const bytes = new Uint8Array(16);
@@ -30,7 +41,7 @@ export async function POST(req: Request) {
     | { action: 'fetch' }
     | { action: 'register'; uuid: string; gamertag: string; avatarUrl: string; pin: string }
     | { action: 'signin';   gamertag: string; pin: string }
-    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; rpChange: number };
+    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; opponentIds: ({ uuid: string } | { ai: 'easy' | 'medium' | 'hard' })[] };
 
   // ── fetch ──────────────────────────────────────────────────────────────────
   if (body.action === 'fetch') {
@@ -85,6 +96,11 @@ export async function POST(req: Request) {
     const { gamertag, pin } = body;
     if (!gamertag || !pin) return Response.json({ error: 'invalid' }, { status: 400 });
 
+    const attempts = await redis.get<number>(rlKey(gamertag));
+    if (attempts !== null && attempts >= 5) {
+      return Response.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
     const uuid = await redis.get<string>(tagKey(gamertag));
     if (!uuid) return Response.json({ error: 'not_found' }, { status: 404 });
 
@@ -95,9 +111,12 @@ export async function POST(req: Request) {
     const salt = d.pinSalt ? String(d.pinSalt) : uuid;
     const pinHash = await hashPin(pin, salt);
     if (pinHash !== String(d.pinHash ?? '')) {
+      const count = await redis.incr(rlKey(gamertag));
+      if (count === 1) await redis.expire(rlKey(gamertag), 15 * 60);
       return Response.json({ error: 'wrong_pin' }, { status: 401 });
     }
 
+    await redis.del(rlKey(gamertag));
     return Response.json({
       uuid,
       gamertag:  String(d.gamertag  ?? gamertag),
@@ -107,21 +126,30 @@ export async function POST(req: Request) {
 
   // ── update (stats) ─────────────────────────────────────────────────────────
   if (body.action === 'update') {
-    const { uuid, gamertag, avatarUrl, won, rpChange } = body;
-    if (!uuid || !gamertag || typeof won !== 'boolean' || typeof rpChange !== 'number') {
+    const { uuid, gamertag, avatarUrl, won, opponentIds } = body;
+    if (!uuid || !gamertag || typeof won !== 'boolean' || !Array.isArray(opponentIds)) {
       return Response.json({ error: 'invalid' }, { status: 400 });
     }
     const key = playerKey(uuid);
     const current = await redis.hgetall(key);
     const currentRP = parseInt(String((current as Record<string, unknown>)?.rp ?? '0')) || 0;
+
+    // Resolve opponent RPs server-side — never trust client-computed values
+    const opponentRPs = await Promise.all(opponentIds.map(async opp => {
+      if ('ai' in opp) return AI_RP[opp.ai];
+      const d = await redis!.hgetall(playerKey(opp.uuid));
+      return parseInt(String((d as Record<string, unknown>)?.rp ?? '0')) || 0;
+    }));
+    const rpChange = calcRPChange(won, currentRP, opponentRPs);
     const newRP = Math.max(0, currentRP + rpChange);
+
     await Promise.all([
       redis.sadd(PLAYERS_SET, uuid),
       redis.hset(key, { gamertag, avatarUrl, rp: newRP }),
       redis.hincrby(key, 'gamesPlayed', 1),
       won ? redis.hincrby(key, 'wins', 1) : Promise.resolve(0),
     ]);
-    return Response.json({ ok: true, rp: newRP });
+    return Response.json({ ok: true, rp: newRP, rpChange });
   }
 
   return Response.json({ error: 'unknown action' }, { status: 400 });

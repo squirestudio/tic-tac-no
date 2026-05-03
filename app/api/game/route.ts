@@ -236,6 +236,26 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── rematch ────────────────────────────────────────────────────────────────
+  if (body.action === 'rematch') {
+    const { code, uuid } = body;
+    if (!code || !uuid) return Response.json({ error: 'invalid' }, { status: 400 });
+
+    const state = await getState(code);
+    if (!state) return Response.json({ error: 'not_found' }, { status: 404 });
+    if (state.hostUUID !== uuid) return Response.json({ error: 'not_host' }, { status: 403 });
+    if (state.phase !== 'gameOver') return Response.json({ error: 'not_game_over' }, { status: 409 });
+
+    state.board = Array(9).fill(null);
+    state.winner = null;
+    state.currentSlot = 0;
+    state.lastMove = null;
+    state.phase = 'waiting';
+    state.updatedAt = Date.now();
+    await setState(state);
+    return Response.json({ ok: true });
+  }
+
   return Response.json({ error: 'unknown action' }, { status: 400 });
 }
 
