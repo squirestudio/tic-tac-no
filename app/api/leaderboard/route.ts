@@ -60,10 +60,15 @@ export async function POST(req: Request) {
     const { uuid, gamertag, avatarUrl, pin } = body;
     if (!uuid || !gamertag || !pin) return Response.json({ error: 'invalid' }, { status: 400 });
 
-    // Check if gamertag is taken by a different UUID
-    const existingUUID = await redis.get<string>(tagKey(gamertag));
-    if (existingUUID && existingUUID !== uuid) {
-      return Response.json({ error: 'gamertag_taken' }, { status: 409 });
+    // Atomically claim the gamertag — SET NX prevents two concurrent registrations
+    // from both passing a read-then-write uniqueness check.
+    const claimed = await redis.set(tagKey(gamertag), uuid, { nx: true });
+    if (!claimed) {
+      // Key already exists — allow only if it belongs to this UUID (re-registration)
+      const existingUUID = await redis.get<string>(tagKey(gamertag));
+      if (existingUUID !== uuid) {
+        return Response.json({ error: 'gamertag_taken' }, { status: 409 });
+      }
     }
 
     const salt = generateSalt();
@@ -71,7 +76,6 @@ export async function POST(req: Request) {
     await Promise.all([
       redis.sadd(PLAYERS_SET, uuid),
       redis.hset(playerKey(uuid), { gamertag, avatarUrl, pinHash, pinSalt: salt }),
-      redis.set(tagKey(gamertag), uuid),
     ]);
     return Response.json({ ok: true });
   }
