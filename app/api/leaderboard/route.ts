@@ -8,41 +8,91 @@ const redis =
     : null;
 
 const PLAYERS_SET = 'lb:players';
-const playerKey = (uuid: string) => `lb:${uuid}`;
+const playerKey  = (uuid: string) => `lb:${uuid}`;
+const tagKey     = (tag: string)  => `lb:tag:${tag.toLowerCase()}`;
+
+async function hashPin(pin: string, uuid: string): Promise<string> {
+  const data = new TextEncoder().encode(pin + ':' + uuid);
+  const buf  = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 export async function POST(req: Request) {
-  if (!redis) return Response.json({});
+  if (!redis) return Response.json({ error: 'no_db' }, { status: 500 });
 
   const body = await req.json() as
     | { action: 'fetch' }
-    | { action: 'update'; uuid: string; gamertag: string; avatarUrl: string; won: boolean; points: number };
+    | { action: 'register'; uuid: string; gamertag: string; avatarUrl: string; pin: string }
+    | { action: 'signin';   gamertag: string; pin: string }
+    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; points: number };
 
+  // ── fetch ──────────────────────────────────────────────────────────────────
   if (body.action === 'fetch') {
     const uuids = await redis.smembers<string[]>(PLAYERS_SET);
     if (!uuids || uuids.length === 0) return Response.json({});
-
-    const entries = await Promise.all(
-      uuids.map(async uuid => {
-        const data = await redis!.hgetall(playerKey(uuid));
-        if (!data) return null;
-        return {
-          uuid,
-          gamertag: String(data.gamertag ?? ''),
-          avatarUrl: String(data.avatarUrl ?? ''),
-          wins: parseInt(String(data.wins ?? '0')),
-          gamesPlayed: parseInt(String(data.gamesPlayed ?? '0')),
-          totalPoints: parseInt(String(data.totalPoints ?? '0')),
-        };
-      })
-    );
-
-    const result: Record<string, { gamertag: string; avatarUrl: string; wins: number; gamesPlayed: number; totalPoints: number }> = {};
-    for (const entry of entries) {
-      if (entry && entry.gamesPlayed > 0) result[entry.uuid] = entry;
+    const entries = await Promise.all(uuids.map(async uuid => {
+      const d = await redis!.hgetall(playerKey(uuid));
+      if (!d) return null;
+      return {
+        uuid,
+        gamertag:    String(d.gamertag    ?? ''),
+        avatarUrl:   String(d.avatarUrl   ?? ''),
+        wins:        parseInt(String(d.wins        ?? '0')),
+        gamesPlayed: parseInt(String(d.gamesPlayed ?? '0')),
+        totalPoints: parseInt(String(d.totalPoints ?? '0')),
+      };
+    }));
+    const result: Record<string, object> = {};
+    for (const e of entries) {
+      if (e && e.gamesPlayed > 0) result[e.uuid] = e;
     }
     return Response.json(result);
   }
 
+  // ── register ───────────────────────────────────────────────────────────────
+  if (body.action === 'register') {
+    const { uuid, gamertag, avatarUrl, pin } = body;
+    if (!uuid || !gamertag || !pin) return Response.json({ error: 'invalid' }, { status: 400 });
+
+    // Check if gamertag is taken by a different UUID
+    const existingUUID = await redis.get<string>(tagKey(gamertag));
+    if (existingUUID && existingUUID !== uuid) {
+      return Response.json({ error: 'gamertag_taken' }, { status: 409 });
+    }
+
+    const pinHash = await hashPin(pin, uuid);
+    await Promise.all([
+      redis.sadd(PLAYERS_SET, uuid),
+      redis.hset(playerKey(uuid), { gamertag, avatarUrl, pinHash }),
+      redis.set(tagKey(gamertag), uuid),
+    ]);
+    return Response.json({ ok: true });
+  }
+
+  // ── signin ─────────────────────────────────────────────────────────────────
+  if (body.action === 'signin') {
+    const { gamertag, pin } = body;
+    if (!gamertag || !pin) return Response.json({ error: 'invalid' }, { status: 400 });
+
+    const uuid = await redis.get<string>(tagKey(gamertag));
+    if (!uuid) return Response.json({ error: 'not_found' }, { status: 404 });
+
+    const d = await redis.hgetall(playerKey(uuid));
+    if (!d) return Response.json({ error: 'not_found' }, { status: 404 });
+
+    const pinHash = await hashPin(pin, uuid);
+    if (pinHash !== String(d.pinHash ?? '')) {
+      return Response.json({ error: 'wrong_pin' }, { status: 401 });
+    }
+
+    return Response.json({
+      uuid,
+      gamertag:  String(d.gamertag  ?? gamertag),
+      avatarUrl: String(d.avatarUrl ?? ''),
+    });
+  }
+
+  // ── update (stats) ─────────────────────────────────────────────────────────
   if (body.action === 'update') {
     const { uuid, gamertag, avatarUrl, won, points } = body;
     if (!uuid || !gamertag || typeof won !== 'boolean' || typeof points !== 'number') {
@@ -53,7 +103,7 @@ export async function POST(req: Request) {
       redis.sadd(PLAYERS_SET, uuid),
       redis.hset(key, { gamertag, avatarUrl }),
       redis.hincrby(key, 'gamesPlayed', 1),
-      won ? redis.hincrby(key, 'wins', 1) : Promise.resolve(0),
+      won ? redis.hincrby(key, 'wins', 1)         : Promise.resolve(0),
       won ? redis.hincrby(key, 'totalPoints', points) : Promise.resolve(0),
     ]);
     return Response.json({ ok: true });

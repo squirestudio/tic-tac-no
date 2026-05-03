@@ -9,7 +9,7 @@ const API = process.env.NEXT_PUBLIC_API_BASE ?? '';
 const ADMOB_BANNER_ID = 'ca-app-pub-3940256099942544/2934735716';
 const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-3940256099942544/4411468910';
 
-type Player = { id: number; name: string; isAI: boolean; color: string; difficulty: 'easy' | 'medium' | 'hard' };
+type Player = { id: number; name: string; isAI: boolean; color: string; difficulty: 'easy' | 'medium' | 'hard'; profileUUID?: string; profileAvatarUrl?: string };
 type Cell = { object: string; owner: number } | null;
 type BattleAnimation = {
   challenger: string;
@@ -20,7 +20,7 @@ type BattleAnimation = {
 };
 type PlayerStats = { wins: number; gamesPlayed: number; totalPoints: number; gamertag: string; avatarUrl: string };
 type LeaderboardData = { [uuid: string]: PlayerStats };
-type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string };
+type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
 
 const AI_NAMES = {
   easy:   ['Kai', 'Tailor', 'Aiko'],
@@ -242,7 +242,18 @@ export default function TicTacNo() {
   const [psGamertag, setPsGamertag] = useState('');
   const [psAvatarWord, setPsAvatarWord] = useState('');
   const [psAvatarUrl, setPsAvatarUrl] = useState('');
+  const [psPin, setPsPin] = useState('');
+  const [psConfirmPin, setPsConfirmPin] = useState('');
+  const [psError, setPsError] = useState('');
   const [psGenerating, setPsGenerating] = useState(false);
+  const [psSaving, setPsSaving] = useState(false);
+
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [signingInIdx, setSigningInIdx] = useState<number | null>(null);
+  const [siGamertag, setSiGamertag] = useState('');
+  const [siPin, setSiPin] = useState('');
+  const [siError, setSiError] = useState('');
+  const [siLoading, setSiLoading] = useState(false);
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardData>(() => {
     try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY) ?? '{}'); }
@@ -271,29 +282,43 @@ export default function TicTacNo() {
     if (!profile) setShowProfileSetup(true);
   }, [profile]);
 
+  // Auto-link device profile to Player 1 when returning to setup
+  useEffect(() => {
+    if (gamePhase === 'setup' && profile) {
+      setPlayers(prev => prev.map((p, i) =>
+        i === 0 && !p.isAI
+          ? { ...p, name: profile.gamertag, profileUUID: profile.uuid, profileAvatarUrl: profile.avatarUrl }
+          : p
+      ));
+    }
+  }, [gamePhase, profile]);
+
   useEffect(() => {
     if (gamePhase !== 'gameOver' || winner === null) return;
     const pts = getWinPoints(players);
 
-    // Post result for the profile holder (device owner)
-    const humanPlayed = players.some(p => !p.isAI);
-    if (profile && humanPlayed) {
-      const humanWon = winner !== null && !players[winner].isAI;
-      fetch(`${API}/api/leaderboard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update', uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl, won: humanWon, points: pts }),
-      }).then(() => fetchLeaderboard()).catch(() => {});
+    // Post result for every signed-in player
+    const signedInPlayers = players.filter(p => !p.isAI && p.profileUUID);
+    if (signedInPlayers.length > 0) {
+      const posts = signedInPlayers.map(p => {
+        const won = players.indexOf(p) === winner;
+        return fetch(`${API}/api/leaderboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, points: pts }),
+        });
+      });
+      Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
 
-      // Optimistically update local state
+      // Optimistic local update
       setLeaderboard(prev => {
-        const s = prev[profile.uuid] ?? { wins: 0, gamesPlayed: 0, totalPoints: 0, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl };
-        const next = { ...prev, [profile.uuid]: {
-          ...s,
-          wins: s.wins + (humanWon ? 1 : 0),
-          gamesPlayed: s.gamesPlayed + 1,
-          totalPoints: s.totalPoints + (humanWon ? pts : 0),
-        }};
+        const next = { ...prev };
+        signedInPlayers.forEach(p => {
+          const won = players.indexOf(p) === winner;
+          const uuid = p.profileUUID!;
+          const s = next[uuid] ?? { wins: 0, gamesPlayed: 0, totalPoints: 0, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '' };
+          next[uuid] = { ...s, wins: s.wins + (won ? 1 : 0), gamesPlayed: s.gamesPlayed + 1, totalPoints: s.totalPoints + (won ? pts : 0) };
+        });
         try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
         return next;
       });
@@ -603,7 +628,8 @@ export default function TicTacNo() {
   // ── Profile Setup ──────────────────────────────────────────────────────────
   if (showProfileSetup) {
     const isEdit = !!profile;
-    const canSave = psGamertag.trim().length > 0 && psAvatarUrl.length > 0;
+    const pinOk = psPin.length === 4 && (!isEdit || psPin === psConfirmPin) && (isEdit || psPin === psConfirmPin);
+    const canSave = psGamertag.trim().length > 0 && psAvatarUrl.length > 0 && pinOk && !psSaving;
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6"
         style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
@@ -660,6 +686,35 @@ export default function TicTacNo() {
               </div>
             </div>
 
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">
+                  {isEdit ? 'New PIN' : 'PIN'} (4 digits)
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={psPin}
+                  onChange={e => { setPsPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPsError(''); }}
+                  placeholder="••••"
+                  style={{ fontSize: '16px' }}
+                  className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">Confirm PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={psConfirmPin}
+                  onChange={e => { setPsConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPsError(''); }}
+                  placeholder="••••"
+                  style={{ fontSize: '16px' }}
+                  className={`w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 outline-none placeholder-gray-500 ${psConfirmPin && psPin !== psConfirmPin ? 'border-red-500' : 'border-purple-400'}`}
+                />
+              </div>
+            </div>
+
             {psAvatarUrl ? (
               <div className="flex justify-center">
                 <div className="w-28 h-28 rounded-2xl overflow-hidden border-4 border-purple-400 shadow-lg shadow-purple-500/30">
@@ -674,22 +729,37 @@ export default function TicTacNo() {
               </div>
             )}
 
+            {psError && <p className="text-red-400 text-sm text-center">{psError}</p>}
+
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (!canSave) return;
-                const newProfile: Profile = {
-                  uuid: profile?.uuid ?? generateUUID(),
-                  gamertag: psGamertag.trim(),
-                  avatarWord: psAvatarWord.trim(),
-                  avatarUrl: psAvatarUrl,
-                };
+                setPsSaving(true);
+                const uuid = profile?.uuid ?? generateUUID();
+                try {
+                  const res = await fetch(`${API}/api/leaderboard`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'register', uuid, gamertag: psGamertag.trim(), avatarUrl: psAvatarUrl, pin: psPin }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    setPsError(data.error === 'gamertag_taken' ? 'That gamertag is taken — choose another.' : 'Something went wrong. Try again.');
+                    setPsSaving(false);
+                    return;
+                  }
+                } catch {
+                  // offline — save locally anyway, will register when online
+                }
+                const newProfile: Profile = { uuid, gamertag: psGamertag.trim(), avatarWord: psAvatarWord.trim(), avatarUrl: psAvatarUrl, pinSet: true };
                 localStorage.setItem(PROFILE_KEY, JSON.stringify(newProfile));
                 setProfile(newProfile);
+                setPsPin(''); setPsConfirmPin(''); setPsSaving(false);
                 setShowProfileSetup(false);
               }}
               disabled={!canSave}
               className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl disabled:opacity-40 transition-all">
-              {isEdit ? 'Save Changes' : 'Save & Play'}
+              {psSaving ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin mx-auto" /> : isEdit ? 'Save Changes' : 'Save & Play'}
             </button>
 
             {isEdit && (
@@ -765,6 +835,25 @@ export default function TicTacNo() {
                           {level === 'easy' ? 'Easy' : level === 'medium' ? 'Medium' : 'Hard'}
                         </button>
                       ))}
+                    </div>
+                  )}
+                  {!player.isAI && (
+                    <div className="mt-2">
+                      {player.profileUUID ? (
+                        <div className="flex items-center gap-2">
+                          {player.profileAvatarUrl && <img src={player.profileAvatarUrl} alt="avatar" className="w-6 h-6 rounded-full object-cover border border-white/30" />}
+                          <span className="text-white/60 text-xs font-bold">✓ Signed in</span>
+                          {idx !== 0 && (
+                            <button onClick={() => setPlayers(prev => prev.map((p, i) => i === idx ? { ...p, profileUUID: undefined, profileAvatarUrl: undefined } : p))}
+                              className="text-white/30 text-xs ml-auto hover:text-white/60">Sign out</button>
+                          )}
+                        </div>
+                      ) : (
+                        <button onClick={() => { setSigningInIdx(idx); setSiGamertag(''); setSiPin(''); setSiError(''); setShowSignIn(true); }}
+                          className="text-xs font-bold text-purple-400 hover:text-purple-300">
+                          + Sign in to track stats
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -850,6 +939,75 @@ export default function TicTacNo() {
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {showSignIn && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => setShowSignIn(false)}>
+          <div className="bg-slate-900 rounded-2xl shadow-2xl p-6 border border-purple-500/30 w-full max-w-sm"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-black text-white">Sign In</h2>
+              <button onClick={() => setShowSignIn(false)} className="text-white/50 hover:text-white text-2xl leading-none">×</button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">Gamertag</label>
+                <input
+                  type="text"
+                  value={siGamertag}
+                  onChange={e => { setSiGamertag(e.target.value); setSiError(''); }}
+                  placeholder="Your gamertag"
+                  style={{ fontSize: '16px' }}
+                  className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500"
+                />
+              </div>
+              <div>
+                <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={siPin}
+                  onChange={e => { setSiPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setSiError(''); }}
+                  placeholder="••••"
+                  style={{ fontSize: '16px' }}
+                  className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500"
+                />
+              </div>
+              {siError && <p className="text-red-400 text-sm">{siError}</p>}
+              <button
+                onClick={async () => {
+                  if (!siGamertag.trim() || siPin.length !== 4 || siLoading) return;
+                  setSiLoading(true);
+                  try {
+                    const res = await fetch(`${API}/api/leaderboard`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'signin', gamertag: siGamertag.trim(), pin: siPin }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      setSiError(res.status === 404 ? 'Gamertag not found.' : res.status === 401 ? 'Wrong PIN.' : 'Sign in failed.');
+                      setSiLoading(false);
+                      return;
+                    }
+                    setPlayers(prev => prev.map((p, i) =>
+                      i === signingInIdx ? { ...p, name: data.gamertag, profileUUID: data.uuid, profileAvatarUrl: data.avatarUrl } : p
+                    ));
+                    setShowSignIn(false);
+                  } catch {
+                    setSiError('Connection error. Try again.');
+                  }
+                  setSiLoading(false);
+                }}
+                disabled={!siGamertag.trim() || siPin.length !== 4 || siLoading}
+                className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold rounded-xl disabled:opacity-40">
+                {siLoading ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin mx-auto" /> : 'Sign In'}
+              </button>
+              <p className="text-white/30 text-xs text-center">Don't have a profile? Create one on your own device.</p>
+            </div>
           </div>
         </div>
       )}
