@@ -21,6 +21,9 @@ type BattleAnimation = {
 type PlayerStats = { wins: number; gamesPlayed: number; totalPoints: number; gamertag: string; avatarUrl: string };
 type LeaderboardData = { [uuid: string]: PlayerStats };
 type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
+type MpPlayer = { uuid: string; gamertag: string; avatarUrl: string; slot: number; color: string };
+type RemoteLastMove = { slot: number; action: string; type: 'placement' | 'battle'; battleNarrative?: string; challenger?: string; challengerOwner?: number; defenderObject?: string; defenderOwner?: number; battleWinner?: string };
+type RemoteGameState = { code: string; phase: 'waiting' | 'playing' | 'gameOver'; players: MpPlayer[]; board: Cell[]; currentSlot: number; winner: number | null; lastMove: RemoteLastMove | null; hostUUID: string; updatedAt: number };
 
 const AI_NAMES = {
   easy:   ['Kai', 'Tailor', 'Aiko'],
@@ -190,6 +193,23 @@ export default function TicTacNo() {
   const gamesPlayedRef = useRef(0);
   const interstitialReadyRef = useRef(false);
 
+  // Multiplayer state
+  const [gameMode, setGameMode] = useState<'local' | 'multiplayer'>('local');
+  const [mySlot, setMySlot] = useState<number | null>(null);
+  const [roomCode, setRoomCode] = useState('');
+  const [mpPhase, setMpPhase] = useState<'idle' | 'lobby' | 'waiting'>('idle');
+  const [mpPlayers, setMpPlayers] = useState<MpPlayer[]>([]);
+  const [mpIsHost, setMpIsHost] = useState(false);
+  const [mpError, setMpError] = useState('');
+  const [mpLoading, setMpLoading] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const gameModeRef = useRef<'local' | 'multiplayer'>('local');
+  const mySlotRef = useRef<number | null>(null);
+  const roomCodeRef = useRef('');
+  const lastSeenUpdatedAt = useRef(0);
+  const lastShownBattleAt = useRef(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (selectedCell !== null && !players[currentPlayer].isAI) {
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -277,6 +297,95 @@ export default function TicTacNo() {
   }, []);
 
   useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
+
+  const syncFromRemote = useCallback((state: RemoteGameState) => {
+    lastSeenUpdatedAt.current = state.updatedAt;
+
+    const newPlayers: Player[] = state.players.map(mp => ({
+      id: mp.slot,
+      name: mp.gamertag,
+      isAI: false,
+      color: mp.color,
+      difficulty: 'medium' as const,
+      profileUUID: mp.uuid,
+      profileAvatarUrl: mp.avatarUrl,
+    }));
+
+    if (state.phase === 'waiting') {
+      setMpPlayers(state.players);
+      return;
+    }
+
+    if (state.phase === 'playing' || state.phase === 'gameOver') {
+      setPlayers(newPlayers);
+      setBoard(state.board);
+      setCurrentPlayer(state.currentSlot);
+
+      if (state.lastMove) {
+        setLastMove({
+          player: newPlayers[state.lastMove.slot]?.name ?? '',
+          action: state.lastMove.action,
+          type: state.lastMove.type,
+        });
+      }
+
+      if (state.phase === 'gameOver') {
+        setWinner(state.winner);
+        setGamePhase('gameOver');
+        setIsGenerating(false);
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        return;
+      }
+
+      // Show battle overlay if there's a new battle we haven't displayed
+      if (state.lastMove?.type === 'battle' && state.updatedAt !== lastShownBattleAt.current) {
+        lastShownBattleAt.current = state.updatedAt;
+        const lm = state.lastMove;
+        setBattleAnimation({
+          challenger: lm.challenger ?? '',
+          challengerOwner: lm.challengerOwner ?? 0,
+          defenderObject: lm.defenderObject ?? '',
+          defenderOwner: lm.defenderOwner ?? 0,
+          winner: lm.battleWinner ?? '',
+        });
+        setBattleNarrative(lm.battleNarrative ?? '');
+        pendingContinuationRef.current = () => {
+          setBattleAnimation(null);
+          setBattleNarrative('');
+          setIsGenerating(false);
+        };
+      } else if (state.lastMove?.type !== 'battle') {
+        setIsGenerating(false);
+      }
+
+      // Transition from waiting room to playing
+      setMpPhase('idle');
+      setGamePhase('playing');
+    }
+  }, []);
+
+  // Polling effect
+  useEffect(() => {
+    if (!roomCode || gameMode !== 'multiplayer') return;
+
+    const doPoll = async () => {
+      try {
+        const res = await fetch(`${API}/api/game`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'poll', code: roomCode }),
+        });
+        if (!res.ok) return;
+        const state: RemoteGameState = await res.json();
+        if (state.updatedAt === lastSeenUpdatedAt.current) return;
+        syncFromRemote(state);
+      } catch {}
+    };
+
+    pollRef.current = setInterval(doPoll, 2000);
+    doPoll(); // immediate first poll
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [roomCode, gameMode, syncFromRemote]);
 
   useEffect(() => {
     if (!profile) setShowProfileSetup(true);
@@ -441,7 +550,7 @@ export default function TicTacNo() {
           setGamePhase('gameOver');
           setIsGenerating(false);
         } else {
-          const next = (playerMakingMove + 1) % 3;
+          const next = (playerMakingMove + 1) % players.length;
           setCurrentPlayer(next);
           setSelectedCell(null);
           setObjectInput('');
@@ -489,7 +598,7 @@ export default function TicTacNo() {
               setGamePhase('gameOver');
               setIsGenerating(false);
             } else {
-              const next = (playerMakingMove + 1) % 3;
+              const next = (playerMakingMove + 1) % players.length;
               setCurrentPlayer(next);
               setSelectedCell(null);
               setObjectInput('');
@@ -572,6 +681,12 @@ export default function TicTacNo() {
   }, [placePiece, players]);
 
   const resetGame = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setGameMode('local'); gameModeRef.current = 'local';
+    setMySlot(null); mySlotRef.current = null;
+    setRoomCode(''); roomCodeRef.current = '';
+    setMpPhase('idle'); setMpPlayers([]); setMpIsHost(false);
+    lastSeenUpdatedAt.current = 0; lastShownBattleAt.current = 0;
     setGamePhase('setup');
     setBoard(Array(9).fill(null));
     setCurrentPlayer(0);
@@ -603,6 +718,26 @@ export default function TicTacNo() {
     if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
   };
 
+  const submitMpMove = useCallback(async (index: number, object: string) => {
+    if (!roomCodeRef.current || mySlotRef.current === null || !profile) return;
+    setIsGenerating(true);
+    try {
+      const res = await fetch(`${API}/api/game`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'move', code: roomCodeRef.current, uuid: profile.uuid, slot: mySlotRef.current, index, object }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setIsGenerating(false);
+        return;
+      }
+      syncFromRemote(data.state);
+    } catch {
+      setIsGenerating(false);
+    }
+  }, [profile, syncFromRemote]);
+
   const submitWord = useCallback(async () => {
     const word = objectInput.trim();
     if (!word || isGenerating || selectedCell === null) return;
@@ -622,8 +757,83 @@ export default function TicTacNo() {
     } catch {
       // if validation fails open, allow through
     }
-    placePiece(selectedCell, word, currentPlayer, board);
-  }, [objectInput, isGenerating, selectedCell, currentPlayer, board, placePiece]);
+    if (gameModeRef.current === 'multiplayer') {
+      await submitMpMove(selectedCell, word);
+      setSelectedCell(null);
+      setObjectInput('');
+    } else {
+      placePiece(selectedCell, word, currentPlayer, board);
+    }
+  }, [objectInput, isGenerating, selectedCell, currentPlayer, board, placePiece, submitMpMove]);
+
+  // Keep refs in sync with state for use in callbacks
+  useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
+  useEffect(() => { mySlotRef.current = mySlot; }, [mySlot]);
+  useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
+
+  const createRoom = useCallback(async () => {
+    if (!profile) return;
+    setMpLoading(true); setMpError('');
+    try {
+      const res = await fetch(`${API}/api/game`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMpError('Failed to create room.'); setMpLoading(false); return; }
+      setRoomCode(data.code);
+      setMySlot(data.slot);
+      setMpIsHost(true);
+      setGameMode('multiplayer');
+      setMpPlayers([{ uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl, slot: 0, color: data.color }]);
+      setMpPhase('waiting');
+      lastSeenUpdatedAt.current = 0;
+    } catch { setMpError('Connection error. Try again.'); }
+    setMpLoading(false);
+  }, [profile]);
+
+  const joinRoom = useCallback(async () => {
+    if (!profile || joinCodeInput.length < 6) return;
+    setMpLoading(true); setMpError('');
+    try {
+      const res = await fetch(`${API}/api/game`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'join', code: joinCodeInput.trim(), uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMpError(data.error === 'not_found' ? 'Room not found.' : data.error === 'room_full' ? 'Room is full.' : data.error === 'game_started' ? 'Game already started.' : 'Failed to join.');
+        setMpLoading(false); return;
+      }
+      setRoomCode(data.code);
+      setMySlot(data.slot);
+      setMpIsHost(false);
+      setGameMode('multiplayer');
+      setMpPhase('waiting');
+      lastSeenUpdatedAt.current = 0;
+    } catch { setMpError('Connection error. Try again.'); }
+    setMpLoading(false);
+  }, [profile, joinCodeInput]);
+
+  const startMultiplayerGame = useCallback(async () => {
+    if (!profile || !roomCode) return;
+    setMpLoading(true); setMpError('');
+    try {
+      const res = await fetch(`${API}/api/game`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', code: roomCode, uuid: profile.uuid }),
+      });
+      if (!res.ok) { setMpError('Failed to start.'); }
+    } catch { setMpError('Connection error.'); }
+    setMpLoading(false);
+  }, [profile, roomCode]);
+
+  const leaveRoom = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setRoomCode(''); setMySlot(null); setGameMode('local'); setMpPhase('lobby');
+    setMpPlayers([]); setMpIsHost(false); setMpError(''); setJoinCodeInput('');
+    lastSeenUpdatedAt.current = 0;
+  }, []);
 
   // ── Profile Setup ──────────────────────────────────────────────────────────
   if (showProfileSetup) {
@@ -774,6 +984,105 @@ export default function TicTacNo() {
     );
   }
 
+  // ── Multiplayer Lobby ──────────────────────────────────────────────────────
+  if (mpPhase === 'lobby') {
+    return (
+      <div className="h-[100dvh] flex flex-col items-center justify-center p-6"
+        style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+        <div className="w-full max-w-sm">
+          <img src="/logo.png" alt="Tic Attack Toe" className="h-28 mx-auto mb-6" />
+          <h2 className="text-2xl font-black text-white text-center mb-6">Multiplayer</h2>
+          {profile && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10 border border-white/10 mb-6">
+              {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />}
+              <div>
+                <p className="text-white font-bold text-sm">{profile.gamertag}</p>
+                <p className="text-white/40 text-xs">Playing as you</p>
+              </div>
+            </div>
+          )}
+          <div className="space-y-4">
+            <button onClick={createRoom} disabled={mpLoading || !profile}
+              className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl disabled:opacity-40">
+              {mpLoading && !joinCodeInput ? 'Creating...' : 'Create Room'}
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-white/20" />
+              <span className="text-white/30 text-sm">or join</span>
+              <div className="flex-1 h-px bg-white/20" />
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={joinCodeInput}
+                onChange={e => { setJoinCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)); setMpError(''); }}
+                placeholder="ROOM CODE"
+                maxLength={6}
+                style={{ fontSize: '16px' }}
+                className="flex-1 bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none text-center font-black tracking-widest placeholder-gray-600"
+              />
+              <button onClick={joinRoom} disabled={mpLoading || joinCodeInput.length < 6 || !profile}
+                className="bg-purple-600 text-white font-bold px-5 rounded-xl disabled:opacity-40">
+                {mpLoading && joinCodeInput ? '...' : 'Join'}
+              </button>
+            </div>
+            {mpError && <p className="text-red-400 text-sm text-center">{mpError}</p>}
+            {!profile && <p className="text-yellow-400 text-sm text-center">Create a profile first to play multiplayer.</p>}
+            <button onClick={() => { setMpPhase('idle'); setMpError(''); setJoinCodeInput(''); }}
+              className="w-full py-3 text-white/40 font-bold text-sm">Back</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Multiplayer Waiting Room ───────────────────────────────────────────────
+  if (mpPhase === 'waiting') {
+    return (
+      <div className="h-[100dvh] flex flex-col items-center justify-center p-6"
+        style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+        <div className="w-full max-w-sm">
+          <img src="/logo.png" alt="Tic Attack Toe" className="h-28 mx-auto mb-6" />
+          <h2 className="text-xl font-black text-white text-center mb-2">Waiting Room</h2>
+          <div className="p-5 rounded-2xl bg-white/5 border border-white/10 text-center mb-5">
+            <p className="text-white/40 text-xs mb-1 uppercase tracking-widest">Room Code</p>
+            <p className="text-5xl font-black text-white tracking-[0.2em]">{roomCode}</p>
+            <p className="text-white/30 text-xs mt-2">Share with your opponents</p>
+          </div>
+          <div className="space-y-2 mb-5">
+            {mpPlayers.map(p => (
+              <div key={p.uuid} className="flex items-center gap-3 p-3 rounded-xl"
+                style={{ background: `${p.color}20`, border: `2px solid ${p.color}40` }}>
+                {p.avatarUrl
+                  ? <img src={p.avatarUrl} alt={p.gamertag} className="w-8 h-8 rounded-full object-cover border-2 border-white/30" />
+                  : <div className="w-8 h-8 rounded-full bg-white/10" />}
+                <span className="text-white font-bold text-sm">{p.gamertag}</span>
+                {p.uuid === profile?.uuid && <span className="text-white/40 text-xs ml-auto font-bold">YOU</span>}
+              </div>
+            ))}
+            {Array.from({ length: 3 - mpPlayers.length }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 rounded-xl border-2 border-dashed border-white/10">
+                <div className="w-8 h-8 rounded-full bg-white/5" />
+                <span className="text-white/25 text-sm">Waiting for player...</span>
+              </div>
+            ))}
+          </div>
+          {mpIsHost && mpPlayers.length >= 2 ? (
+            <button onClick={startMultiplayerGame} disabled={mpLoading}
+              className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl mb-3 disabled:opacity-40">
+              {mpLoading ? 'Starting...' : `Start Game (${mpPlayers.length} players)`}
+            </button>
+          ) : (
+            <p className="text-white/40 text-sm text-center mb-3 animate-pulse">
+              {mpIsHost ? 'Waiting for at least one more player...' : 'Waiting for host to start...'}
+            </p>
+          )}
+          {mpError && <p className="text-red-400 text-sm text-center mb-2">{mpError}</p>}
+          <button onClick={leaveRoom} className="w-full py-3 text-white/30 text-sm font-bold">Leave Room</button>
+        </div>
+      </div>
+    );
+  }
+
   // ── Setup ──────────────────────────────────────────────────────────────────
   if (gamePhase === 'setup') {
     return (
@@ -866,7 +1175,7 @@ export default function TicTacNo() {
             </div>
             </div>{/* end scrollable */}
             {/* Fixed Play button footer */}
-            <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/10">
+            <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/10 space-y-2">
             <button
               onClick={() => {
                 const emptyBoard = Array(9).fill(null);
@@ -876,7 +1185,12 @@ export default function TicTacNo() {
                 if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
               }}
               className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl hover:shadow-2xl transition-all">
-              Play
+              Play vs AI / Local
+            </button>
+            <button
+              onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
+              className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-base rounded-xl transition-all">
+              🌐 Multiplayer
             </button>
             </div>
           </div>
@@ -1026,7 +1340,8 @@ export default function TicTacNo() {
 
   // ── Playing ────────────────────────────────────────────────────────────────
   if (gamePhase === 'playing') {
-    const isHumanTurn = !players[currentPlayer].isAI;
+    const isMultiplayer = gameMode === 'multiplayer';
+    const isHumanTurn = isMultiplayer ? currentPlayer === mySlot : !players[currentPlayer].isAI;
     return (
       <div className="h-[100dvh] flex flex-col overflow-hidden" style={{ backgroundColor: '#000000' }}>
 
@@ -1200,9 +1515,15 @@ export default function TicTacNo() {
             </div>
           ) : (
             <div className="text-center py-3">
-              <p className="text-purple-400 text-sm animate-pulse">
-                {isGenerating ? `${players[currentPlayer].name} is placing...` : `${players[currentPlayer].name} is thinking...`}
-              </p>
+              {isMultiplayer ? (
+                <p className="text-purple-400 text-sm animate-pulse">
+                  Waiting for {players[currentPlayer]?.name ?? 'opponent'}...
+                </p>
+              ) : (
+                <p className="text-purple-400 text-sm animate-pulse">
+                  {isGenerating ? `${players[currentPlayer].name} is placing...` : `${players[currentPlayer].name} is thinking...`}
+                </p>
+              )}
             </div>
           )}
         </div>
