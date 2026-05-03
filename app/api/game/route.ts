@@ -236,6 +236,25 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── leave ──────────────────────────────────────────────────────────────────
+  if (body.action === 'leave') {
+    const { code, uuid } = body;
+    if (!code || !uuid) return Response.json({ error: 'invalid' }, { status: 400 });
+
+    const state = await getState(code);
+    if (!state || state.phase !== 'waiting') return Response.json({ ok: true });
+
+    if (state.hostUUID === uuid) {
+      // Host left — cancel the game so other players stop polling
+      await redis.del(gameKey(code));
+    } else {
+      state.players = state.players.filter(p => p.uuid !== uuid);
+      state.updatedAt = Date.now();
+      await setState(state);
+    }
+    return Response.json({ ok: true });
+  }
+
   // ── rematch ────────────────────────────────────────────────────────────────
   if (body.action === 'rematch') {
     const { code, uuid } = body;

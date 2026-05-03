@@ -224,6 +224,8 @@ export default function TicTacNo() {
   const imgRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollFailCountRef = useRef(0);
   const [mpConnectionLost, setMpConnectionLost] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [showBattleLog, setShowBattleLog] = useState(false);
 
   useEffect(() => {
     if (selectedCell !== null && !players[currentPlayer].isAI) {
@@ -424,6 +426,15 @@ export default function TicTacNo() {
           body: JSON.stringify({ action: 'poll', code: roomCode }),
         });
         if (!res.ok) {
+          if (res.status === 404) {
+            // Host cancelled the game — stop polling and return to lobby
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            setRoomCode(''); setMySlot(null); setGameMode('local'); setMpPhase('lobby');
+            setMpPlayers([]); setMpIsHost(false); setJoinCodeInput('');
+            lastSeenUpdatedAt.current = 0; pollFailCountRef.current = 0; setMpConnectionLost(false);
+            setMpError('Host left — game was cancelled.');
+            return;
+          }
           pollFailCountRef.current += 1;
           if (pollFailCountRef.current >= 3) setMpConnectionLost(true);
           return;
@@ -519,7 +530,12 @@ export default function TicTacNo() {
         clearTimeout(timeout);
         setImageCache(prev => {
           const next = { ...prev, [key]: url };
-          try { localStorage.setItem(CACHE_KEY, JSON.stringify(next)); } catch {}
+          // Cap localStorage at 100 entries — evict oldest by insertion order
+          const allKeys = Object.keys(next);
+          const toSave = allKeys.length > 120
+            ? Object.fromEntries(allKeys.slice(-100).map(k => [k, next[k]]))
+            : next;
+          try { localStorage.setItem(CACHE_KEY, JSON.stringify(toSave)); } catch {}
           return next;
         });
         pendingImages.current.delete(key);
@@ -945,10 +961,17 @@ export default function TicTacNo() {
 
   const leaveRoom = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (roomCodeRef.current && profile?.uuid) {
+      fetch(`${API}/api/game`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'leave', code: roomCodeRef.current, uuid: profile.uuid }),
+      }).catch(() => {});
+    }
     setRoomCode(''); setMySlot(null); setGameMode('local'); setMpPhase('lobby');
     setMpPlayers([]); setMpIsHost(false); setMpError(''); setJoinCodeInput('');
     lastSeenUpdatedAt.current = 0; pollFailCountRef.current = 0; setMpConnectionLost(false);
-  }, []);
+  }, [profile]);
 
   // ── Profile Setup ──────────────────────────────────────────────────────────
   if (showProfileSetup) {
@@ -1168,7 +1191,20 @@ export default function TicTacNo() {
           <div className="p-5 rounded-2xl bg-white/5 border border-white/10 text-center mb-5">
             <p className="text-white/40 text-xs mb-1 uppercase tracking-widest">Room Code</p>
             <p className="text-5xl font-black text-white tracking-[0.2em]">{roomCode}</p>
-            <p className="text-white/30 text-xs mt-2">Share with your opponents</p>
+            <button
+              onClick={() => {
+                const msg = `Join my Tic Attack Toe game! Room code: ${roomCode}`;
+                if (navigator.share) {
+                  navigator.share({ title: 'Tic Attack Toe', text: msg }).catch(() => {});
+                } else {
+                  navigator.clipboard.writeText(roomCode).catch(() => {});
+                }
+                setCodeCopied(true);
+                setTimeout(() => setCodeCopied(false), 2000);
+              }}
+              className="mt-3 px-4 py-1.5 rounded-lg bg-white/10 text-white/70 text-xs font-bold hover:bg-white/20 transition-all">
+              {codeCopied ? '✓ Copied!' : '📋 Copy Code'}
+            </button>
           </div>
           <div className="space-y-2 mb-5">
             {mpPlayers.map(p => (
@@ -1486,6 +1522,7 @@ export default function TicTacNo() {
                 {siLoading ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin mx-auto" /> : 'Sign In'}
               </button>
               <p className="text-white/30 text-xs text-center">Don't have a profile? Create one on your own device.</p>
+              <p className="text-white/30 text-xs text-center">Forgot your PIN? PINs can't be recovered — you'll need a new gamertag.</p>
             </div>
           </div>
         </div>
@@ -1565,6 +1602,30 @@ export default function TicTacNo() {
           );
         })()}
 
+        {/* Battle log overlay */}
+        {showBattleLog && battleLog.length > 0 && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 flex items-end justify-center p-4"
+            onClick={() => setShowBattleLog(false)}>
+            <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md max-h-80 flex flex-col"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+                <span className="text-white font-bold text-sm">Battle History</span>
+                <button onClick={() => setShowBattleLog(false)} className="text-white/40 text-xl leading-none">×</button>
+              </div>
+              <div className="overflow-y-auto p-3 space-y-2">
+                {[...battleLog].reverse().map((b, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <span className="text-white/50 shrink-0">sq{b.spot + 1}</span>
+                    <span className={b.winner.toLowerCase() === b.challenger.toLowerCase() ? 'text-green-400 font-bold' : 'text-white/40'}>{b.challenger}</span>
+                    <span className="text-white/30">vs</span>
+                    <span className={b.winner.toLowerCase() === b.defender.toLowerCase() ? 'text-green-400 font-bold' : 'text-white/40'}>{b.defender}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="shrink-0 px-4 flex items-center justify-between" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
           <button onClick={resetGame} disabled={isGenerating}
@@ -1572,10 +1633,18 @@ export default function TicTacNo() {
             <ArrowLeft size={18} />
           </button>
           <img src="/logo.png" alt="Tic Attack Toe" className="h-36" />
-          <button onClick={restartGame} disabled={isGenerating}
-            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-            <RotateCcw size={16} />
-          </button>
+          <div className="flex gap-2">
+            {battleLog.length > 0 && (
+              <button onClick={() => setShowBattleLog(v => !v)}
+                className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1.5 rounded-lg text-xs font-bold">
+                ⚔️ {battleLog.length}
+              </button>
+            )}
+            <button onClick={restartGame} disabled={isGenerating}
+              className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+              <RotateCcw size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Last move hint */}
