@@ -292,6 +292,20 @@ export default function TicTacNo() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [myRPDelta, setMyRPDelta] = useState<number | null>(null);
   const [setupStep, setSetupStep] = useState<'mode' | 'config'>('mode');
+  const lbContainerRef = useRef<HTMLDivElement>(null);
+  const lbUserRowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showLeaderboard) return;
+    // Wait one frame for the DOM to render, then center the user's row
+    const id = requestAnimationFrame(() => {
+      const container = lbContainerRef.current;
+      const row = lbUserRowRef.current;
+      if (!container || !row) return;
+      container.scrollTop = row.offsetTop - container.clientHeight / 2 + row.clientHeight / 2;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [showLeaderboard]);
 
   // Fetch global leaderboard on mount and when leaderboard modal opens
   const fetchLeaderboard = useCallback(async () => {
@@ -1265,24 +1279,36 @@ export default function TicTacNo() {
               <button onClick={() => setShowLeaderboard(false)} className="text-white/50 hover:text-white text-2xl leading-none">×</button>
             </div>
             {(() => {
-              const entries = Object.entries(leaderboard)
+              const allEntries = Object.entries(leaderboard)
                 .map(([uuid, stats]) => ({ uuid, stats, rank: getRank(stats.rp ?? 0) }))
                 .sort((a, b) => (b.stats.rp ?? 0) - (a.stats.rp ?? 0));
-              if (entries.length === 0) return (
+              if (allEntries.length === 0) return (
                 <p className="text-white/50 text-center py-8">No players yet.<br/>Play a game to appear here.</p>
               );
+              const userIdx = allEntries.findIndex(e => e.uuid === profile?.uuid);
+              const center = userIdx === -1 ? 0 : userIdx;
+              const start = Math.max(0, center - 100);
+              const end = Math.min(allEntries.length, center + 101);
+              const visible = allEntries.slice(start, end);
+              const aboveCount = start;
+              const belowCount = allEntries.length - end;
               return (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {entries.map(({ uuid, stats, rank }, i) => {
+                <div ref={lbContainerRef} className="space-y-2 max-h-96 overflow-y-auto">
+                  {aboveCount > 0 && (
+                    <p className="text-white/30 text-xs text-center py-1">↑ {aboveCount} player{aboveCount !== 1 ? 's' : ''} above</p>
+                  )}
+                  {visible.map(({ uuid, stats, rank }) => {
+                    const i = allEntries.findIndex(e => e.uuid === uuid);
                     const rp = stats.rp ?? 0;
                     const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
                     const isMe = uuid === profile?.uuid;
                     const tierColor = TIER_DISPLAY[rank.tier].color;
                     const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / 100) * 100);
                     return (
-                      <div key={uuid} className={`p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
+                      <div key={uuid} ref={isMe ? lbUserRowRef : undefined}
+                        className={`p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
                         <div className="flex items-center gap-3">
-                          <span className="text-white/40 font-bold w-5 text-sm shrink-0">{i + 1}</span>
+                          <span className="text-white/40 font-bold w-6 text-sm shrink-0 text-right">{i + 1}</span>
                           {stats.avatarUrl
                             ? <img src={stats.avatarUrl} alt={stats.gamertag} className="w-9 h-9 rounded-full object-cover border-2 border-white/20 shrink-0" />
                             : <div className="w-9 h-9 rounded-full bg-slate-700 shrink-0" />}
@@ -1292,20 +1318,20 @@ export default function TicTacNo() {
                               {isMe && <span className="text-purple-400 text-xs font-bold shrink-0">YOU</span>}
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold shrink-0" style={{ color: tierColor }}>
-                                {rank.label}
-                              </span>
+                              <span className="text-xs font-bold shrink-0" style={{ color: tierColor }}>{rank.label}</span>
                               <span className="text-white/30 text-xs">{rp} RP · {winPct}% wins</span>
                             </div>
                           </div>
                         </div>
-                        {/* RP progress bar within sub-rank */}
                         <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
                           <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
                         </div>
                       </div>
                     );
                   })}
+                  {belowCount > 0 && (
+                    <p className="text-white/30 text-xs text-center py-1">↓ {belowCount} player{belowCount !== 1 ? 's' : ''} below</p>
+                  )}
                   <p className="text-white/30 text-xs text-center pt-1">
                     Bronze I→III (0–299) · Silver I→III (300–599) · Gold I→III (600+)
                   </p>
