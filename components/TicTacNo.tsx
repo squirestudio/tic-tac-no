@@ -233,9 +233,38 @@ export default function TicTacNo() {
   });
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
+  // Fetch global leaderboard on mount and when leaderboard modal opens
+  const fetchLeaderboard = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/leaderboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'fetch' }),
+      });
+      if (!res.ok) return;
+      const data: LeaderboardData = await res.json();
+      setLeaderboard(data);
+      try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(data)); } catch {}
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
+
   useEffect(() => {
     if (gamePhase !== 'gameOver' || winner === null) return;
     const pts = getWinPoints(players);
+
+    // Post each human player's result to the global leaderboard
+    players.forEach((p, idx) => {
+      if (p.isAI) return;
+      fetch(`${API}/api/leaderboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update', name: p.name, won: idx === winner, points: pts }),
+      }).then(() => fetchLeaderboard()).catch(() => {});
+    });
+
+    // Optimistically update local state and localStorage
     setLeaderboard(prev => {
       const next = { ...prev };
       players.forEach((p, idx) => {
@@ -562,7 +591,7 @@ export default function TicTacNo() {
           <div className={`bg-slate-900/40 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-purple-500/30 transition-opacity duration-700 ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">Configure Players</h2>
-              <button onClick={() => setShowLeaderboard(true)} className="text-2xl">🏆</button>
+              <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-2xl">🏆</button>
             </div>
             <div className="space-y-4 mb-8">
               {players.map((player, idx) => (
