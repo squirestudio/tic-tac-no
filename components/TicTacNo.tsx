@@ -1133,7 +1133,7 @@ export default function TicTacNo() {
                         {(() => {
                           const rp = leaderboard[profile.uuid]?.rp ?? 0;
                           const rank = getRank(rp);
-                          return <p className="text-xs font-bold" style={{ color: TIER_DISPLAY[rank.tier].color }}>{TIER_DISPLAY[rank.tier].emoji} {rank.label} · {rp} RP</p>;
+                          return <p className="text-xs font-bold" style={{ color: TIER_DISPLAY[rank.tier].color }}>{rank.label} · {rp} RP</p>;
                         })()}
                       </div>
                     </div>
@@ -1154,7 +1154,7 @@ export default function TicTacNo() {
                 <button
                   onClick={() => setSetupStep('config')}
                   className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl transition-all">
-                  ⚔️ Play vs AI / Local
+                  Play (Local)
                 </button>
                 <button
                   onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
@@ -1292,7 +1292,7 @@ export default function TicTacNo() {
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-bold shrink-0" style={{ color: tierColor }}>
-                                {TIER_DISPLAY[rank.tier].emoji} {rank.label}
+                                {rank.label}
                               </span>
                               <span className="text-white/30 text-xs">{rp} RP · {winPct}% wins</span>
                             </div>
@@ -1608,7 +1608,7 @@ export default function TicTacNo() {
             return (
               <div className="mb-6 p-4 rounded-xl bg-white/10 border border-white/20 text-center w-full max-w-xs mx-auto">
                 <p className="text-2xl font-black mb-1" style={{ color: tierColor }}>
-                  {TIER_DISPLAY[rank.tier].emoji} {rank.label}
+                  {rank.label}
                 </p>
                 <p className="text-white/50 text-xs mb-3">{rp} RP{rpToNext ? ` · ${rpToNext} to next rank` : ' · MAX'}</p>
                 {/* RP bar */}
