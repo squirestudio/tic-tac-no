@@ -219,6 +219,8 @@ export default function TicTacNo() {
   const lastSeenUpdatedAt = useRef(0);
   const lastShownBattleAt = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollFailCountRef = useRef(0);
+  const [mpConnectionLost, setMpConnectionLost] = useState(false);
 
   useEffect(() => {
     if (selectedCell !== null && !players[currentPlayer].isAI) {
@@ -401,11 +403,20 @@ export default function TicTacNo() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'poll', code: roomCode }),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          pollFailCountRef.current += 1;
+          if (pollFailCountRef.current >= 3) setMpConnectionLost(true);
+          return;
+        }
+        pollFailCountRef.current = 0;
+        setMpConnectionLost(false);
         const state: RemoteGameState = await res.json();
         if (state.updatedAt === lastSeenUpdatedAt.current) return;
         syncFromRemote(state);
-      } catch {}
+      } catch {
+        pollFailCountRef.current += 1;
+        if (pollFailCountRef.current >= 3) setMpConnectionLost(true);
+      }
     };
 
     pollRef.current = setInterval(doPoll, 2000);
@@ -527,18 +538,21 @@ export default function TicTacNo() {
     onWinner: (winner: string) => void,
   ) => {
     setBattleNarrative('');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    let winnerParsed = false;
     try {
       const response = await fetch(`${API}/api/battle-narrative`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ challenger, defender }),
+        signal: controller.signal,
       });
       if (!response.body) { onWinner(challenger); return; }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let winnerParsed = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -562,9 +576,15 @@ export default function TicTacNo() {
       }
 
       if (!winnerParsed) onWinner(challenger);
-    } catch {
-      onWinner(challenger);
-      setBattleNarrative('The battle raged, and a victor emerged from the chaos.');
+    } catch (e) {
+      if (!winnerParsed) onWinner(challenger);
+      setBattleNarrative(
+        e instanceof Error && e.name === 'AbortError'
+          ? 'The battle was too intense to chronicle in time...'
+          : 'The battle raged, and a victor emerged from the chaos.'
+      );
+    } finally {
+      clearTimeout(timeout);
     }
   }, []);
 
@@ -727,6 +747,7 @@ export default function TicTacNo() {
     setRoomCode(''); roomCodeRef.current = '';
     setMpPhase('idle'); setMpPlayers([]); setMpIsHost(false);
     lastSeenUpdatedAt.current = 0; lastShownBattleAt.current = 0;
+    pollFailCountRef.current = 0; setMpConnectionLost(false);
     setGamePhase('setup');
     setBoard(Array(9).fill(null));
     setCurrentPlayer(0);
@@ -763,21 +784,30 @@ export default function TicTacNo() {
   const submitMpMove = useCallback(async (index: number, object: string) => {
     if (!roomCodeRef.current || mySlotRef.current === null || !profile) return;
     setIsGenerating(true);
-    try {
-      const res = await fetch(`${API}/api/game`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'move', code: roomCodeRef.current, uuid: profile.uuid, slot: mySlotRef.current, index, object }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(`${API}/api/game`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'move', code: roomCodeRef.current, uuid: profile.uuid, slot: mySlotRef.current, index, object }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.error === 'try_again' && attempt < 2) {
+            await new Promise(r => setTimeout(r, 300));
+            continue;
+          }
+          setIsGenerating(false);
+          return;
+        }
+        syncFromRemote(data.state);
+        return;
+      } catch {
         setIsGenerating(false);
         return;
       }
-      syncFromRemote(data.state);
-    } catch {
-      setIsGenerating(false);
     }
+    setIsGenerating(false);
   }, [profile, syncFromRemote]);
 
   const submitWord = useCallback(async () => {
@@ -874,7 +904,7 @@ export default function TicTacNo() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     setRoomCode(''); setMySlot(null); setGameMode('local'); setMpPhase('lobby');
     setMpPlayers([]); setMpIsHost(false); setMpError(''); setJoinCodeInput('');
-    lastSeenUpdatedAt.current = 0;
+    lastSeenUpdatedAt.current = 0; pollFailCountRef.current = 0; setMpConnectionLost(false);
   }, []);
 
   // ── Profile Setup ──────────────────────────────────────────────────────────
@@ -1082,6 +1112,12 @@ export default function TicTacNo() {
     return (
       <div className="h-[100dvh] flex flex-col items-center justify-center p-6"
         style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+        {mpConnectionLost && (
+          <div className="fixed top-0 inset-x-0 z-50 bg-red-600 text-white text-center text-sm py-2 font-bold animate-pulse"
+            style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}>
+            Connection lost — trying to reconnect...
+          </div>
+        )}
         <div className="w-full max-w-sm">
           <img src="/logo.png" alt="Tic Attack Toe" className="h-28 mx-auto mb-6" />
           <h2 className="text-xl font-black text-white text-center mb-2">Waiting Room</h2>
@@ -1420,6 +1456,14 @@ export default function TicTacNo() {
     const isHumanTurn = isMultiplayer ? currentPlayer === mySlot : !players[currentPlayer].isAI;
     return (
       <div className="h-[100dvh] flex flex-col overflow-hidden" style={{ backgroundColor: '#000000' }}>
+
+        {/* Connection lost banner */}
+        {isMultiplayer && mpConnectionLost && (
+          <div className="fixed top-0 inset-x-0 z-50 bg-red-600 text-white text-center text-sm py-2 font-bold animate-pulse"
+            style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}>
+            Connection lost — trying to reconnect...
+          </div>
+        )}
 
         {/* Battle Overlay */}
         {battleAnimation && (() => {

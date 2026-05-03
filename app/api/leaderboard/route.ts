@@ -11,8 +11,14 @@ const PLAYERS_SET = 'lb:players';
 const playerKey  = (uuid: string) => `lb:${uuid}`;
 const tagKey     = (tag: string)  => `lb:tag:${tag.toLowerCase()}`;
 
-async function hashPin(pin: string, uuid: string): Promise<string> {
-  const data = new TextEncoder().encode(pin + ':' + uuid);
+function generateSalt(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPin(pin: string, salt: string): Promise<string> {
+  const data = new TextEncoder().encode(pin + ':' + salt);
   const buf  = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -60,10 +66,11 @@ export async function POST(req: Request) {
       return Response.json({ error: 'gamertag_taken' }, { status: 409 });
     }
 
-    const pinHash = await hashPin(pin, uuid);
+    const salt = generateSalt();
+    const pinHash = await hashPin(pin, salt);
     await Promise.all([
       redis.sadd(PLAYERS_SET, uuid),
-      redis.hset(playerKey(uuid), { gamertag, avatarUrl, pinHash }),
+      redis.hset(playerKey(uuid), { gamertag, avatarUrl, pinHash, pinSalt: salt }),
       redis.set(tagKey(gamertag), uuid),
     ]);
     return Response.json({ ok: true });
@@ -80,7 +87,9 @@ export async function POST(req: Request) {
     const d = await redis.hgetall(playerKey(uuid));
     if (!d) return Response.json({ error: 'not_found' }, { status: 404 });
 
-    const pinHash = await hashPin(pin, uuid);
+    // Support both salted (new) and UUID-salted (legacy) hashes
+    const salt = d.pinSalt ? String(d.pinSalt) : uuid;
+    const pinHash = await hashPin(pin, salt);
     if (pinHash !== String(d.pinHash ?? '')) {
       return Response.json({ error: 'wrong_pin' }, { status: 401 });
     }

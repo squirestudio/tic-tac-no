@@ -57,6 +57,7 @@ function generateCode(): string {
 }
 
 function gameKey(code: string) { return `mp:${code.toUpperCase()}`; }
+function lockKey(code: string) { return `mp:lock:${code.toUpperCase()}`; }
 
 async function getState(code: string): Promise<GameState | null> {
   if (!redis) return null;
@@ -181,48 +182,59 @@ export async function POST(req: Request) {
     if (!code || !uuid || typeof slot !== 'number' || typeof index !== 'number' || !object) {
       return Response.json({ error: 'invalid' }, { status: 400 });
     }
-
-    const state = await getState(code);
-    if (!state) return Response.json({ error: 'not_found' }, { status: 404 });
-    if (state.phase !== 'playing') return Response.json({ error: 'not_playing' }, { status: 409 });
-    if (state.currentSlot !== slot) return Response.json({ error: 'not_your_turn' }, { status: 403 });
-    if (state.players[slot]?.uuid !== uuid) return Response.json({ error: 'unauthorized' }, { status: 403 });
-
-    const board = [...state.board];
-    const newCell: Cell = { object, owner: slot };
-    let lastMove: LastMove;
-
-    if (board[index] === null) {
-      board[index] = newCell;
-      lastMove = { slot, action: `Placed "${object}" on square ${index + 1}`, type: 'placement' };
-    } else {
-      const existing = board[index]!;
-      const { winner: battleWinner, narrative } = await resolveBattle(object, existing.object);
-      const challengerWon = battleWinner.toLowerCase().includes(object.toLowerCase()) ||
-        battleWinner.toLowerCase() === object.toLowerCase();
-      if (challengerWon) board[index] = newCell;
-      lastMove = {
-        slot,
-        action: `"${object}" ${challengerWon ? 'defeated' : 'lost to'} "${existing.object}"`,
-        type: 'battle',
-        battleNarrative: narrative,
-        challenger: object,
-        challengerOwner: slot,
-        defenderObject: existing.object,
-        defenderOwner: existing.owner,
-        battleWinner,
-      };
+    if (slot < 0 || slot > 2 || index < 0 || index > 8) {
+      return Response.json({ error: 'invalid' }, { status: 400 });
     }
 
-    const gameWinner = checkWinner(board);
-    state.board = board;
-    state.lastMove = lastMove;
-    state.winner = gameWinner;
-    state.phase = gameWinner !== null ? 'gameOver' : 'playing';
-    state.currentSlot = gameWinner !== null ? state.currentSlot : (slot + 1) % state.players.length;
-    state.updatedAt = Date.now();
-    await setState(state);
-    return Response.json({ ok: true, state });
+    // Acquire per-room lock to prevent concurrent move race conditions
+    const acquired = await redis.set(lockKey(code), '1', { nx: true, ex: 10 });
+    if (!acquired) return Response.json({ error: 'try_again' }, { status: 409 });
+
+    try {
+      const state = await getState(code);
+      if (!state) return Response.json({ error: 'not_found' }, { status: 404 });
+      if (state.phase !== 'playing') return Response.json({ error: 'not_playing' }, { status: 409 });
+      if (state.currentSlot !== slot) return Response.json({ error: 'not_your_turn' }, { status: 403 });
+      if (state.players[slot]?.uuid !== uuid) return Response.json({ error: 'unauthorized' }, { status: 403 });
+
+      const board = [...state.board];
+      const newCell: Cell = { object, owner: slot };
+      let lastMove: LastMove;
+
+      if (board[index] === null) {
+        board[index] = newCell;
+        lastMove = { slot, action: `Placed "${object}" on square ${index + 1}`, type: 'placement' };
+      } else {
+        const existing = board[index]!;
+        const { winner: battleWinner, narrative } = await resolveBattle(object, existing.object);
+        const challengerWon = battleWinner.toLowerCase().includes(object.toLowerCase()) ||
+          battleWinner.toLowerCase() === object.toLowerCase();
+        if (challengerWon) board[index] = newCell;
+        lastMove = {
+          slot,
+          action: `"${object}" ${challengerWon ? 'defeated' : 'lost to'} "${existing.object}"`,
+          type: 'battle',
+          battleNarrative: narrative,
+          challenger: object,
+          challengerOwner: slot,
+          defenderObject: existing.object,
+          defenderOwner: existing.owner,
+          battleWinner,
+        };
+      }
+
+      const gameWinner = checkWinner(board);
+      state.board = board;
+      state.lastMove = lastMove;
+      state.winner = gameWinner;
+      state.phase = gameWinner !== null ? 'gameOver' : 'playing';
+      state.currentSlot = gameWinner !== null ? state.currentSlot : (slot + 1) % state.players.length;
+      state.updatedAt = Date.now();
+      await setState(state);
+      return Response.json({ ok: true, state });
+    } finally {
+      await redis.del(lockKey(code));
+    }
   }
 
   return Response.json({ error: 'unknown action' }, { status: 400 });
