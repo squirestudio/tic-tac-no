@@ -199,6 +199,7 @@ export default function TicTacNo() {
   const pendingContinuationRef = useRef<(() => void) | null>(null);
   const usedWordsRef = useRef<Set<string>>(new Set());
   const pendingImages = useRef<Set<string>>(new Set());
+  const validationCache = useRef<Map<string, boolean>>(new Map());
   const inputRef = useRef<HTMLInputElement>(null);
   const gamesPlayedRef = useRef(0);
   const interstitialReadyRef = useRef(false);
@@ -814,20 +815,30 @@ export default function TicTacNo() {
     const word = objectInput.trim();
     if (!word || isGenerating || selectedCell === null) return;
     setIsGenerating(true);
-    try {
-      const res = await fetch(`${API}/api/validate-word`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word }),
-      });
-      const { ok } = await res.json();
-      if (!ok) {
-        setWordError("That word isn't allowed — please try something else.");
-        setIsGenerating(false);
-        return;
+    const wordKey = word.toLowerCase().trim();
+    const cachedResult = validationCache.current.get(wordKey);
+    if (cachedResult === false) {
+      setWordError("That word isn't allowed — please try something else.");
+      setIsGenerating(false);
+      return;
+    }
+    if (cachedResult === undefined) {
+      try {
+        const res = await fetch(`${API}/api/validate-word`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ word }),
+        });
+        const { ok } = await res.json();
+        validationCache.current.set(wordKey, ok);
+        if (!ok) {
+          setWordError("That word isn't allowed — please try something else.");
+          setIsGenerating(false);
+          return;
+        }
+      } catch {
+        // if validation fails open, allow through
       }
-    } catch {
-      // if validation fails open, allow through
     }
     if (gameModeRef.current === 'multiplayer') {
       await submitMpMove(selectedCell, word);

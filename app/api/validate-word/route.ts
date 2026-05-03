@@ -1,9 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { Redis } from '@upstash/redis';
 
 const client = new Anthropic();
 
+const redis =
+  process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+    ? new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN })
+    : null;
+
 export async function POST(req: Request) {
   const { word } = await req.json();
+  const key = `val:${word.toLowerCase().trim()}`;
+
+  // Check Redis cache first — validated words never need re-checking
+  if (redis) {
+    const cached = await redis.get<string>(key);
+    if (cached !== null) return Response.json({ ok: cached === '1' });
+  }
 
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5',
@@ -16,6 +29,8 @@ export async function POST(req: Request) {
   const ok =
     msg.content[0].type === 'text' &&
     msg.content[0].text.trim().toUpperCase().startsWith('Y');
+
+  if (redis) await redis.set(key, ok ? '1' : '0');
 
   return Response.json({ ok });
 }
