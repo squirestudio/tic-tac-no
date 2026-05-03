@@ -18,7 +18,7 @@ type BattleAnimation = {
   defenderOwner: number;
   winner: string;
 };
-type PlayerStats = { wins: number; gamesPlayed: number; totalPoints: number; gamertag: string; avatarUrl: string };
+type PlayerStats = { wins: number; gamesPlayed: number; rp: number; gamertag: string; avatarUrl: string };
 type LeaderboardData = { [uuid: string]: PlayerStats };
 type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
 type MpPlayer = { uuid: string; gamertag: string; avatarUrl: string; slot: number; color: string };
@@ -133,27 +133,37 @@ function generateUUID() {
   catch { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 }
 
-function getWinPoints(players: Player[]) {
-  const aiDiffs = players.filter(p => p.isAI).map(p => p.difficulty);
-  if (aiDiffs.includes('hard')) return 3;
-  if (aiDiffs.includes('medium')) return 2;
-  if (aiDiffs.length > 0) return 1;
-  return 1;
+const AI_RP = { easy: 50, medium: 200, hard: 450 } as const;
+
+function calcRPChange(won: boolean, myRP: number, opponentRPs: number[]): number {
+  if (opponentRPs.length === 0) return won ? 20 : -15;
+  const avg = opponentRPs.reduce((a, b) => a + b, 0) / opponentRPs.length;
+  const diff = avg - myRP;
+  if (won) return Math.max(10, Math.min(60, Math.round(25 + diff / 10)));
+  return -Math.max(5, Math.min(50, Math.round(20 - diff / 10)));
 }
 
-function getTier(stats: PlayerStats): 'bronze' | 'silver' | 'gold' | null {
-  const { gamesPlayed, totalPoints } = stats;
-  if (gamesPlayed < 10) return null;
-  const ppg = totalPoints / gamesPlayed;
-  if (gamesPlayed >= 50 && ppg >= 1.5) return 'gold';
-  if (gamesPlayed >= 25 && ppg >= 1.0) return 'silver';
-  return 'bronze';
+type RankInfo = { tier: 'bronze' | 'silver' | 'gold'; level: 1 | 2 | 3; label: string; minRP: number; maxRP: number };
+const RANKS: RankInfo[] = [
+  { tier: 'bronze', level: 1, label: 'Bronze I',   minRP: 0,   maxRP: 99   },
+  { tier: 'bronze', level: 2, label: 'Bronze II',  minRP: 100, maxRP: 199  },
+  { tier: 'bronze', level: 3, label: 'Bronze III', minRP: 200, maxRP: 299  },
+  { tier: 'silver', level: 1, label: 'Silver I',   minRP: 300, maxRP: 399  },
+  { tier: 'silver', level: 2, label: 'Silver II',  minRP: 400, maxRP: 499  },
+  { tier: 'silver', level: 3, label: 'Silver III', minRP: 500, maxRP: 599  },
+  { tier: 'gold',   level: 1, label: 'Gold I',     minRP: 600, maxRP: 699  },
+  { tier: 'gold',   level: 2, label: 'Gold II',    minRP: 700, maxRP: 799  },
+  { tier: 'gold',   level: 3, label: 'Gold III',   minRP: 800, maxRP: Infinity },
+];
+
+function getRank(rp: number): RankInfo {
+  return RANKS.find(r => rp >= r.minRP && rp <= r.maxRP) ?? RANKS[0];
 }
 
 const TIER_DISPLAY = {
-  gold:   { emoji: '🥇', label: 'Gold',   color: '#FFD700' },
-  silver: { emoji: '🥈', label: 'Silver', color: '#C0C0C0' },
-  bronze: { emoji: '🥉', label: 'Bronze', color: '#CD7F32' },
+  gold:   { emoji: '🥇', color: '#FFD700' },
+  silver: { emoji: '🥈', color: '#C0C0C0' },
+  bronze: { emoji: '🥉', color: '#CD7F32' },
 };
 
 function checkWinner(board: Cell[]) {
@@ -280,6 +290,7 @@ export default function TicTacNo() {
     catch { return {}; }
   });
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [myRPDelta, setMyRPDelta] = useState<number | null>(null);
 
   // Fetch global leaderboard on mount and when leaderboard modal opens
   const fetchLeaderboard = useCallback(async () => {
@@ -404,34 +415,48 @@ export default function TicTacNo() {
 
   useEffect(() => {
     if (gamePhase !== 'gameOver' || winner === null) return;
-    const pts = getWinPoints(players);
 
-    // Post result for every signed-in player
     const signedInPlayers = players.filter(p => !p.isAI && p.profileUUID);
-    if (signedInPlayers.length > 0) {
-      const posts = signedInPlayers.map(p => {
-        const won = players.indexOf(p) === winner;
-        return fetch(`${API}/api/leaderboard`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, points: pts }),
-        });
-      });
-      Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
+    if (signedInPlayers.length === 0) return;
 
-      // Optimistic local update
-      setLeaderboard(prev => {
-        const next = { ...prev };
-        signedInPlayers.forEach(p => {
-          const won = players.indexOf(p) === winner;
-          const uuid = p.profileUUID!;
-          const s = next[uuid] ?? { wins: 0, gamesPlayed: 0, totalPoints: 0, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '' };
-          next[uuid] = { ...s, wins: s.wins + (won ? 1 : 0), gamesPlayed: s.gamesPlayed + 1, totalPoints: s.totalPoints + (won ? pts : 0) };
-        });
-        try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
-        return next;
+    const posts = signedInPlayers.map(p => {
+      const playerIdx = players.indexOf(p);
+      const won = playerIdx === winner;
+      const myRP = leaderboard[p.profileUUID!]?.rp ?? 0;
+      const opponentRPs = players
+        .filter((_, i) => i !== playerIdx)
+        .map(opp => opp.isAI ? AI_RP[opp.difficulty] : (opp.profileUUID && leaderboard[opp.profileUUID] ? leaderboard[opp.profileUUID].rp : 100));
+      const rpChange = calcRPChange(won, myRP, opponentRPs);
+
+      if (p.profileUUID === profile?.uuid) setMyRPDelta(rpChange);
+
+      return fetch(`${API}/api/leaderboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, rpChange }),
       });
-    }
+    });
+
+    Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
+
+    // Optimistic local update
+    setLeaderboard(prev => {
+      const next = { ...prev };
+      signedInPlayers.forEach(p => {
+        const playerIdx = players.indexOf(p);
+        const won = playerIdx === winner;
+        const uuid = p.profileUUID!;
+        const myRP = next[uuid]?.rp ?? 0;
+        const opponentRPs = players
+          .filter((_, i) => i !== playerIdx)
+          .map(opp => opp.isAI ? AI_RP[opp.difficulty] : (opp.profileUUID && next[opp.profileUUID] ? next[opp.profileUUID].rp : 100));
+        const rpChange = calcRPChange(won, myRP, opponentRPs);
+        const s = next[uuid] ?? { wins: 0, gamesPlayed: 0, rp: 0, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '' };
+        next[uuid] = { ...s, wins: s.wins + (won ? 1 : 0), gamesPlayed: s.gamesPlayed + 1, rp: Math.max(0, myRP + rpChange) };
+      });
+      try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase, winner]);
 
@@ -697,6 +722,7 @@ export default function TicTacNo() {
     setBattleAnimation(null);
     setBattleNarrative('');
     setLastMove(null);
+    setMyRPDelta(null);
     pendingContinuationRef.current = null;
     usedWordsRef.current = new Set();
     pendingImages.current = new Set();
@@ -1208,56 +1234,48 @@ export default function TicTacNo() {
             </div>
             {(() => {
               const entries = Object.entries(leaderboard)
-                .map(([uuid, stats]) => ({ uuid, stats, tier: getTier(stats) }))
-                .sort((a, b) => {
-                  const tierOrder = { gold: 3, silver: 2, bronze: 1, null: 0 };
-                  const ta = tierOrder[a.tier ?? 'null'];
-                  const tb = tierOrder[b.tier ?? 'null'];
-                  if (ta !== tb) return tb - ta;
-                  const ppgA = a.stats.gamesPlayed > 0 ? a.stats.totalPoints / a.stats.gamesPlayed : 0;
-                  const ppgB = b.stats.gamesPlayed > 0 ? b.stats.totalPoints / b.stats.gamesPlayed : 0;
-                  return ppgB - ppgA;
-                });
+                .map(([uuid, stats]) => ({ uuid, stats, rank: getRank(stats.rp ?? 0) }))
+                .sort((a, b) => (b.stats.rp ?? 0) - (a.stats.rp ?? 0));
               if (entries.length === 0) return (
-                <p className="text-white/50 text-center py-8">No ranked players yet.<br/>Play 10 games to appear here.</p>
+                <p className="text-white/50 text-center py-8">No players yet.<br/>Play a game to appear here.</p>
               );
               return (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {entries.map(({ uuid, stats, tier }, i) => {
-                    const ppg = stats.gamesPlayed > 0 ? (stats.totalPoints / stats.gamesPlayed).toFixed(1) : '0.0';
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {entries.map(({ uuid, stats, rank }, i) => {
+                    const rp = stats.rp ?? 0;
                     const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
-                    const gamesLeft = Math.max(0, 10 - stats.gamesPlayed);
                     const isMe = uuid === profile?.uuid;
+                    const tierColor = TIER_DISPLAY[rank.tier].color;
+                    const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / 100) * 100);
                     return (
-                      <div key={uuid} className={`flex items-center gap-3 p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
-                        <span className="text-white/40 font-bold w-5 text-sm shrink-0">{i + 1}</span>
-                        {stats.avatarUrl
-                          ? <img src={stats.avatarUrl} alt={stats.gamertag} className="w-10 h-10 rounded-full object-cover border-2 border-white/20 shrink-0" />
-                          : <div className="w-10 h-10 rounded-full bg-slate-700 shrink-0" />}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-white font-bold truncate">{stats.gamertag || 'Unknown'}</span>
-                            {isMe && <span className="text-purple-400 text-xs font-bold shrink-0">YOU</span>}
-                            {tier && <span className="text-sm shrink-0">{TIER_DISPLAY[tier].emoji}</span>}
-                          </div>
-                          <div className="text-white/50 text-xs mt-0.5">
-                            {tier
-                              ? `${stats.gamesPlayed} games · ${winPct}% wins · ${ppg} pts/game`
-                              : gamesLeft > 0
-                                ? `${stats.gamesPlayed} games · ${gamesLeft} to rank`
-                                : `${stats.gamesPlayed} games · ${winPct}% wins`}
+                      <div key={uuid} className={`p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-white/40 font-bold w-5 text-sm shrink-0">{i + 1}</span>
+                          {stats.avatarUrl
+                            ? <img src={stats.avatarUrl} alt={stats.gamertag} className="w-9 h-9 rounded-full object-cover border-2 border-white/20 shrink-0" />
+                            : <div className="w-9 h-9 rounded-full bg-slate-700 shrink-0" />}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="text-white font-bold text-sm truncate">{stats.gamertag || 'Unknown'}</span>
+                              {isMe && <span className="text-purple-400 text-xs font-bold shrink-0">YOU</span>}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold shrink-0" style={{ color: tierColor }}>
+                                {TIER_DISPLAY[rank.tier].emoji} {rank.label}
+                              </span>
+                              <span className="text-white/30 text-xs">{rp} RP · {winPct}% wins</span>
+                            </div>
                           </div>
                         </div>
-                        {tier && (
-                          <span className="text-xs font-bold shrink-0" style={{ color: TIER_DISPLAY[tier].color }}>
-                            {TIER_DISPLAY[tier].label}
-                          </span>
-                        )}
+                        {/* RP progress bar within sub-rank */}
+                        <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
+                        </div>
                       </div>
                     );
                   })}
-                  <p className="text-white/30 text-xs text-center pt-2">
-                    🥉 Bronze: 10+ games · 🥈 Silver: 25+ games, 1.0 pts/game · 🥇 Gold: 50+ games, 1.5 pts/game
+                  <p className="text-white/30 text-xs text-center pt-1">
+                    Bronze I→III (0–299) · Silver I→III (300–599) · Gold I→III (600+)
                   </p>
                 </div>
               );
@@ -1549,20 +1567,28 @@ export default function TicTacNo() {
             {winnerPlayer.name}
           </div>
           {(() => {
-            if (winnerPlayer.isAI || !profile) return null;
+            if (!profile) return null;
             const stats = leaderboard[profile.uuid];
-            if (!stats || stats.gamesPlayed < 10) return (
-              <p className="text-white/40 text-sm mb-6">
-                {stats ? `${Math.max(0, 10 - stats.gamesPlayed)} more games to rank` : '10 more games to rank'}
-              </p>
-            );
-            const tier = getTier(stats);
-            const ppg = (stats.totalPoints / stats.gamesPlayed).toFixed(1);
-            const winPct = Math.round((stats.wins / stats.gamesPlayed) * 100);
+            const rp = stats?.rp ?? 0;
+            const rank = getRank(rp);
+            const tierColor = TIER_DISPLAY[rank.tier].color;
+            const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / 100) * 100);
+            const rpToNext = rank.maxRP === Infinity ? null : rank.maxRP - rp + 1;
             return (
-              <div className="mb-6 p-3 rounded-xl bg-white/10 border border-white/20 text-center">
-                {tier && <p className="text-2xl mb-1">{TIER_DISPLAY[tier].emoji} <span className="font-bold" style={{ color: TIER_DISPLAY[tier].color }}>{TIER_DISPLAY[tier].label}</span></p>}
-                <p className="text-white/60 text-xs">{stats.gamesPlayed} games · {winPct}% wins · {ppg} pts/game</p>
+              <div className="mb-6 p-4 rounded-xl bg-white/10 border border-white/20 text-center w-full max-w-xs mx-auto">
+                <p className="text-2xl font-black mb-1" style={{ color: tierColor }}>
+                  {TIER_DISPLAY[rank.tier].emoji} {rank.label}
+                </p>
+                <p className="text-white/50 text-xs mb-3">{rp} RP{rpToNext ? ` · ${rpToNext} to next rank` : ' · MAX'}</p>
+                {/* RP bar */}
+                <div className="h-2 rounded-full bg-white/10 overflow-hidden mb-3">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
+                </div>
+                {myRPDelta !== null && (
+                  <p className={`text-sm font-black ${myRPDelta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {myRPDelta >= 0 ? `+${myRPDelta}` : myRPDelta} RP {myRPDelta >= 0 ? '↑' : '↓'}
+                  </p>
+                )}
               </div>
             );
           })()}

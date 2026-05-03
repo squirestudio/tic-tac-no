@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     | { action: 'fetch' }
     | { action: 'register'; uuid: string; gamertag: string; avatarUrl: string; pin: string }
     | { action: 'signin';   gamertag: string; pin: string }
-    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; points: number };
+    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; rpChange: number };
 
   // ── fetch ──────────────────────────────────────────────────────────────────
   if (body.action === 'fetch') {
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
         avatarUrl:   String(d.avatarUrl   ?? ''),
         wins:        parseInt(String(d.wins        ?? '0')),
         gamesPlayed: parseInt(String(d.gamesPlayed ?? '0')),
-        totalPoints: parseInt(String(d.totalPoints ?? '0')),
+        rp:          parseInt(String(d.rp          ?? '0')) || 0,
       };
     }));
     const result: Record<string, object> = {};
@@ -94,19 +94,21 @@ export async function POST(req: Request) {
 
   // ── update (stats) ─────────────────────────────────────────────────────────
   if (body.action === 'update') {
-    const { uuid, gamertag, avatarUrl, won, points } = body;
-    if (!uuid || !gamertag || typeof won !== 'boolean' || typeof points !== 'number') {
+    const { uuid, gamertag, avatarUrl, won, rpChange } = body;
+    if (!uuid || !gamertag || typeof won !== 'boolean' || typeof rpChange !== 'number') {
       return Response.json({ error: 'invalid' }, { status: 400 });
     }
     const key = playerKey(uuid);
+    const current = await redis.hgetall(key);
+    const currentRP = parseInt(String((current as Record<string, unknown>)?.rp ?? '0')) || 0;
+    const newRP = Math.max(0, currentRP + rpChange);
     await Promise.all([
       redis.sadd(PLAYERS_SET, uuid),
-      redis.hset(key, { gamertag, avatarUrl }),
+      redis.hset(key, { gamertag, avatarUrl, rp: newRP }),
       redis.hincrby(key, 'gamesPlayed', 1),
-      won ? redis.hincrby(key, 'wins', 1)         : Promise.resolve(0),
-      won ? redis.hincrby(key, 'totalPoints', points) : Promise.resolve(0),
+      won ? redis.hincrby(key, 'wins', 1) : Promise.resolve(0),
     ]);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, rp: newRP });
   }
 
   return Response.json({ error: 'unknown action' }, { status: 400 });
