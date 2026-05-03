@@ -284,6 +284,7 @@ export default function TicTacNo() {
   const [psError, setPsError] = useState('');
   const [psGenerating, setPsGenerating] = useState(false);
   const [psSaving, setPsSaving] = useState(false);
+  const [psMode, setPsMode] = useState<'create' | 'signin'>('create');
 
   const [showSignIn, setShowSignIn] = useState(false);
   const [signingInIdx, setSigningInIdx] = useState<number | null>(null);
@@ -978,6 +979,69 @@ export default function TicTacNo() {
     const isEdit = !!profile;
     const pinOk = psPin.length === 4 && (!isEdit || psPin === psConfirmPin) && (isEdit || psPin === psConfirmPin);
     const canSave = psGamertag.trim().length > 0 && psAvatarUrl.length > 0 && pinOk && !psSaving;
+
+    if (psMode === 'signin') {
+      const canSignIn = psGamertag.trim().length > 0 && psPin.length === 4 && !psSaving;
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6"
+          style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+          <div className="w-full max-w-sm">
+            <img src="/logo.png" alt="Tic Attack Toe" className="h-28 mx-auto mb-8" />
+            <h2 className="text-2xl font-black text-white text-center mb-1">Sign In</h2>
+            <p className="text-white/40 text-sm text-center mb-8">Use your existing gamertag and PIN</p>
+            <div className="space-y-4">
+              <div>
+                <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">Gamertag</label>
+                <input type="text" value={psGamertag} onChange={e => { setPsGamertag(e.target.value); setPsError(''); }}
+                  placeholder="Your gamertag" maxLength={20} style={{ fontSize: '16px' }}
+                  className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500" />
+              </div>
+              <div>
+                <label className="text-white/60 text-xs font-bold uppercase tracking-wide mb-1 block">PIN (4 digits)</label>
+                <input type="password" inputMode="numeric" value={psPin}
+                  onChange={e => { setPsPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPsError(''); }}
+                  placeholder="••••" style={{ fontSize: '16px' }}
+                  className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 border-2 border-purple-400 outline-none placeholder-gray-500" />
+              </div>
+              {psError && <p className="text-red-400 text-sm text-center">{psError}</p>}
+              <button
+                onClick={async () => {
+                  if (!canSignIn) return;
+                  setPsSaving(true); setPsError('');
+                  try {
+                    const res = await fetch(`${API}/api/leaderboard`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'signin', gamertag: psGamertag.trim(), pin: psPin }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      setPsError(res.status === 404 ? 'Gamertag not found.' : res.status === 401 ? 'Wrong PIN.' : res.status === 429 ? 'Too many attempts — try again in 15 minutes.' : 'Sign in failed.');
+                      setPsSaving(false); return;
+                    }
+                    const newProfile: Profile = { uuid: data.uuid, gamertag: data.gamertag, avatarWord: '', avatarUrl: data.avatarUrl, pinSet: true };
+                    try { localStorage.setItem(PROFILE_KEY, JSON.stringify(newProfile)); } catch {}
+                    setProfile(newProfile);
+                    setPsPin(''); setPsSaving(false); setPsMode('create'); setShowProfileSetup(false);
+                  } catch {
+                    setPsError('Connection error. Try again.');
+                    setPsSaving(false);
+                  }
+                }}
+                disabled={!canSignIn}
+                className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl disabled:opacity-40 transition-all">
+                {psSaving ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin mx-auto" /> : 'Sign In'}
+              </button>
+              <button onClick={() => { setPsMode('create'); setPsError(''); setPsPin(''); }}
+                className="w-full py-3 text-white/40 font-bold text-sm">
+                Back to Create Profile
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6"
         style={{ backgroundColor: '#000', paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
@@ -1111,10 +1175,15 @@ export default function TicTacNo() {
               {psSaving ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin mx-auto" /> : isEdit ? 'Save Changes' : 'Save & Play'}
             </button>
 
-            {isEdit && (
+            {isEdit ? (
               <button onClick={() => setShowProfileSetup(false)}
                 className="w-full py-3 text-white/50 font-bold text-sm">
                 Cancel
+              </button>
+            ) : (
+              <button onClick={() => { setPsMode('signin'); setPsError(''); setPsPin(''); setPsConfirmPin(''); }}
+                className="w-full py-3 text-white/40 font-bold text-sm">
+                Already have a profile? Sign in
               </button>
             )}
           </div>
