@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     msg.content[0].type === 'text' &&
     msg.content[0].text.trim().toUpperCase().startsWith('Y');
 
-  if (redis) await redis.set(key, ok ? '1' : '0');
+  if (redis && ok) await redis.set(key, '1');
 
   return Response.json({ ok });
 }

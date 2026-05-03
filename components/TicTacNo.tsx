@@ -853,7 +853,7 @@ export default function TicTacNo() {
           body: JSON.stringify({ word }),
         });
         const { ok } = await res.json();
-        validationCache.current.set(wordKey, ok);
+        if (ok) validationCache.current.set(wordKey, true);
         if (!ok) {
           setWordError("That word isn't allowed — please try something else.");
           setIsGenerating(false);
