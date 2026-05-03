@@ -19,6 +19,17 @@ type BattleAnimation = {
   winner: string;
 };
 
+const AI_NAMES = {
+  easy:   ['Kai', 'Tailor', 'Aiko'],
+  medium: ['Raiden', 'Cairo', 'Zaire', 'Jaime'],
+  hard:   ['Gaia', 'Saint', 'Draith', 'Vail'],
+};
+
+const pickAIName = (difficulty: 'easy' | 'medium' | 'hard') => {
+  const pool = AI_NAMES[difficulty];
+  return pool[Math.floor(Math.random() * pool.length)];
+};
+
 const AI_WORDS = {
   easy: [
     'feather', 'bubble', 'noodle', 'dandelion', 'tissue', 'cotton', 'puddle',
@@ -537,6 +548,7 @@ export default function TicTacNo() {
               onClick={() => {
                 const emptyBoard = Array(9).fill(null);
                 setBoard(emptyBoard);
+                setPlayers(prev => prev.map(p => p.isAI ? { ...p, name: pickAIName(p.difficulty) } : p));
                 setGamePhase('playing');
                 if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
               }}
