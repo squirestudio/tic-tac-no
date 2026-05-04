@@ -1716,13 +1716,6 @@ export default function TicTacNo() {
           </div>
         </div>
 
-        {/* Last move hint */}
-        <div className="px-4 pb-1 shrink-0 h-5">
-          {lastMove && (
-            <p className="text-xs text-yellow-400/70 truncate">{lastMove.player}: {lastMove.action}</p>
-          )}
-        </div>
-
         {/* Board */}
         <div className="flex-1 flex flex-col items-center justify-center min-h-0 px-3 gap-2">
           {/* Player indicators above board */}
@@ -1785,6 +1778,10 @@ export default function TicTacNo() {
               })}
             </div>
           </div>
+          {/* Last move hint */}
+          {lastMove && (
+            <p className="text-xs text-white/30 text-center truncate px-2 pt-1">{lastMove.player}: {lastMove.action}</p>
+          )}
         </div>
 
         {/* Input bar */}
