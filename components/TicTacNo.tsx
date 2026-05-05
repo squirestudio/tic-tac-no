@@ -223,6 +223,7 @@ export default function TicTacNo() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imgRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollFailCountRef = useRef(0);
+  const fetchImageRef = useRef<(word: string) => void>(() => {});
   const [mpConnectionLost, setMpConnectionLost] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [showBattleLog, setShowBattleLog] = useState(false);
@@ -285,6 +286,7 @@ export default function TicTacNo() {
   const [psGenerating, setPsGenerating] = useState(false);
   const [psSaving, setPsSaving] = useState(false);
   const [psMode, setPsMode] = useState<'create' | 'signin'>('create');
+  const [cacheCleared, setCacheCleared] = useState(false);
 
   const [showSignIn, setShowSignIn] = useState(false);
   const [signingInIdx, setSigningInIdx] = useState<number | null>(null);
@@ -370,6 +372,7 @@ export default function TicTacNo() {
     if (state.phase === 'playing' || state.phase === 'gameOver') {
       setPlayers(newPlayers);
       setBoard(state.board);
+      state.board.forEach(cell => { if (cell) fetchImageRef.current(cell.object); });
       setCurrentPlayer(state.currentSlot);
 
       if (state.lastMove) {
@@ -547,6 +550,7 @@ export default function TicTacNo() {
         imgRetryRef.current = setTimeout(() => fetchImage(word), 2000);
       });
   }, [imageCache]);
+  useEffect(() => { fetchImageRef.current = fetchImage; }, [fetchImage]);
 
   const dismissBattleOverlay = useCallback(() => {
     if (pendingContinuationRef.current) {
@@ -974,6 +978,28 @@ export default function TicTacNo() {
     lastSeenUpdatedAt.current = 0; pollFailCountRef.current = 0; setMpConnectionLost(false);
   }, [profile]);
 
+  const forfeitGame = useCallback(() => {
+    if (profile?.uuid) {
+      const myIdx = players.findIndex(p => p.profileUUID === profile.uuid);
+      if (myIdx !== -1) {
+        type OppId = { ai: 'easy' | 'medium' | 'hard' } | { uuid: string };
+        const opponentIds = players
+          .filter((_, i) => i !== myIdx)
+          .reduce<OppId[]>((acc, opp) => {
+            if (opp.isAI) acc.push({ ai: opp.difficulty as 'easy' | 'medium' | 'hard' });
+            else if (opp.profileUUID) acc.push({ uuid: opp.profileUUID });
+            return acc;
+          }, []);
+        fetch(`${API}/api/leaderboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl ?? '', won: false, opponentIds }),
+        }).catch(() => {});
+      }
+    }
+    leaveRoom();
+  }, [profile, players, leaveRoom]);
+
   // ── Profile Setup ──────────────────────────────────────────────────────────
   if (showProfileSetup) {
     const isEdit = !!profile;
@@ -1176,10 +1202,22 @@ export default function TicTacNo() {
             </button>
 
             {isEdit ? (
-              <button onClick={() => setShowProfileSetup(false)}
-                className="w-full py-3 text-white/50 font-bold text-sm">
-                Cancel
-              </button>
+              <>
+                <button onClick={() => setShowProfileSetup(false)}
+                  className="w-full py-3 text-white/50 font-bold text-sm">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    try { localStorage.removeItem(CACHE_KEY); } catch {}
+                    setImageCache({});
+                    setCacheCleared(true);
+                    setTimeout(() => setCacheCleared(false), 3000);
+                  }}
+                  className="w-full py-2 text-white/25 text-xs">
+                  {cacheCleared ? '✓ Image cache cleared' : 'Clear image cache'}
+                </button>
+              </>
             ) : (
               <button onClick={() => { setPsMode('signin'); setPsError(''); setPsPin(''); setPsConfirmPin(''); }}
                 className="w-full py-3 text-white/40 font-bold text-sm">
@@ -1262,9 +1300,8 @@ export default function TicTacNo() {
             <p className="text-5xl font-black text-white tracking-[0.2em]">{roomCode}</p>
             <button
               onClick={() => {
-                const msg = `Join my Tic Attack Toe game! Room code: ${roomCode}`;
                 if (navigator.share) {
-                  navigator.share({ title: 'Tic Attack Toe', text: msg }).catch(() => {});
+                  navigator.share({ title: 'Tic Attack Toe', text: roomCode }).catch(() => {});
                 } else {
                   navigator.clipboard.writeText(roomCode).catch(() => {});
                 }
@@ -1359,7 +1396,7 @@ export default function TicTacNo() {
                 <button
                   onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
                   className="w-full py-3 bg-slate-700/80 text-white font-bold text-base rounded-xl transition-all">
-                  🌐 Multiplayer
+                  Multiplayer
                 </button>
               </div>
             </div>
@@ -1697,7 +1734,7 @@ export default function TicTacNo() {
 
         {/* Header */}
         <div className="shrink-0 px-4 flex items-center justify-between" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
-          <button onClick={resetGame} disabled={isGenerating}
+          <button onClick={isMultiplayer ? forfeitGame : resetGame} disabled={isGenerating}
             className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
             <ArrowLeft size={18} />
           </button>
@@ -1709,10 +1746,10 @@ export default function TicTacNo() {
                 ⚔️ {battleLog.length}
               </button>
             )}
-            <button onClick={restartGame} disabled={isGenerating}
+            {!isMultiplayer && <button onClick={restartGame} disabled={isGenerating}
               className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
               <RotateCcw size={16} />
-            </button>
+            </button>}
           </div>
         </div>
 

@@ -242,15 +242,24 @@ export async function POST(req: Request) {
     if (!code || !uuid) return Response.json({ error: 'invalid' }, { status: 400 });
 
     const state = await getState(code);
-    if (!state || state.phase !== 'waiting') return Response.json({ ok: true });
+    if (!state) return Response.json({ ok: true });
 
-    if (state.hostUUID === uuid) {
-      // Host left — cancel the game so other players stop polling
-      await redis.del(gameKey(code));
-    } else {
-      state.players = state.players.filter(p => p.uuid !== uuid);
-      state.updatedAt = Date.now();
-      await setState(state);
+    if (state.phase === 'waiting') {
+      if (state.hostUUID === uuid) {
+        await redis.del(gameKey(code));
+      } else {
+        state.players = state.players.filter(p => p.uuid !== uuid);
+        state.updatedAt = Date.now();
+        await setState(state);
+      }
+    } else if (state.phase === 'playing') {
+      const remaining = state.players.filter(p => p.uuid !== uuid);
+      if (remaining.length === 1) {
+        state.winner = remaining[0].slot;
+        state.phase = 'gameOver';
+        state.updatedAt = Date.now();
+        await setState(state);
+      }
     }
     return Response.json({ ok: true });
   }
