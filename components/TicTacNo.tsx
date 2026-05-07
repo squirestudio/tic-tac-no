@@ -5,9 +5,8 @@ import { RotateCcw, Crown, ArrowLeft, Send } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
-// Replace with real AdMob IDs before App Store submission
-const ADMOB_BANNER_ID = 'ca-app-pub-3940256099942544/2934735716';
-const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-3940256099942544/4411468910';
+const ADMOB_BANNER_ID = 'ca-app-pub-1846904638589540/6309454751';
+const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-1846904638589540/3244307714';
 
 type Player = { id: number; name: string; isAI: boolean; color: string; difficulty: 'easy' | 'medium' | 'hard'; profileUUID?: string; profileAvatarUrl?: string };
 type Cell = { object: string; owner: number } | null;
@@ -246,8 +245,8 @@ export default function TicTacNo() {
     (async () => {
       try {
         const { AdMob } = await import('@capacitor-community/admob');
-        await AdMob.initialize({ testingDevices: ['38fb9eede2a049e7edc2b60ac79bc09e'] });
-        await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true });
+        await AdMob.initialize({});
+        await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false });
         interstitialReadyRef.current = true;
       } catch {}
     })();
@@ -263,7 +262,7 @@ export default function TicTacNo() {
             adSize: BannerAdSize.ADAPTIVE_BANNER,
             position: BannerAdPosition.BOTTOM_CENTER,
             margin: 0,
-            isTesting: true,
+            isTesting: false,
           });
         } else {
           await AdMob.hideBanner();
@@ -1934,7 +1933,7 @@ export default function TicTacNo() {
                     const { AdMob } = await import('@capacitor-community/admob');
                     interstitialReadyRef.current = false;
                     await AdMob.showInterstitial();
-                    AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: true })
+                    AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false })
                       .then(() => { interstitialReadyRef.current = true; })
                       .catch(() => {});
                   } catch {}
