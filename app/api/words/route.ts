@@ -1,6 +1,13 @@
+import { Redis } from '@upstash/redis';
+
 export const revalidate = 0;
 
-const WORDS = {
+const redis =
+  process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+    ? new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN })
+    : null;
+
+const FALLBACK = {
   easy: [
     'feather', 'bubble', 'noodle', 'dandelion', 'tissue', 'cotton', 'puddle',
     'pebble', 'smoke', 'drizzle', 'yawn', 'marshmallow', 'slime', 'snowflake', 'fog',
@@ -60,7 +67,23 @@ const WORDS = {
 };
 
 export async function GET() {
-  return Response.json(WORDS);
+  if (!redis) return Response.json(FALLBACK);
+
+  try {
+    const [easy, medium, hard] = await Promise.all([
+      redis.get<string[]>('words:easy'),
+      redis.get<string[]>('words:medium'),
+      redis.get<string[]>('words:hard'),
+    ]);
+
+    return Response.json({
+      easy:   easy   ?? FALLBACK.easy,
+      medium: medium ?? FALLBACK.medium,
+      hard:   hard   ?? FALLBACK.hard,
+    });
+  } catch {
+    return Response.json(FALLBACK);
+  }
 }
 
 export async function OPTIONS() {
