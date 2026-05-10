@@ -35,13 +35,13 @@ const pickAIName = (difficulty: 'easy' | 'medium' | 'hard') => {
   return pool[Math.floor(Math.random() * pool.length)];
 };
 
-const AI_WORDS = {
+const AI_WORDS_FALLBACK = {
   easy: [
     'feather', 'bubble', 'noodle', 'dandelion', 'tissue', 'cotton', 'puddle',
     'pebble', 'smoke', 'drizzle', 'yawn', 'marshmallow', 'slime', 'snowflake', 'fog',
     'petal', 'leaf', 'dewdrop', 'cobweb', 'candle', 'pillow', 'mitten', 'button',
     'ribbon', 'confetti', 'chalk', 'crayon', 'napkin', 'sponge', 'raindrop',
-    'breeze', 'whisper', 'hiccup', 'sneeze', 'giggle', 'pudding', 'lollipop',
+    'breeze', 'whisper', 'sneeze', 'giggle', 'pudding', 'lollipop',
     'cupcake', 'sprinkle', 'jellybean', 'daisy', 'butterfly', 'ladybug', 'hamster',
     'goldfish', 'tadpole', 'caterpillar', 'dust bunny', 'yarn', 'toothpick', 'straw',
     'popsicle', 'balloon', 'kite', 'pinwheel', 'moth', 'sparrow', 'snail', 'worm',
@@ -49,7 +49,7 @@ const AI_WORDS = {
     'cookie', 'crumb', 'fluff', 'wisp', 'soap', 'cotton candy', 'paper clip',
     'rubber band', 'wet noodle', 'soggy cracker', 'empty bottle', 'bath sponge',
     'wind chime', 'paper boat', 'origami crane', 'bubble wrap', 'lint', 'speck',
-    'teardrop', 'dandelion seed', 'flower crown', 'daydream', 'hiccup', 'sunbeam',
+    'teardrop', 'dandelion seed', 'flower crown', 'daydream', 'sunbeam',
     'rainbow', 'cloud', 'kitten', 'puppy', 'hamster wheel', 'bouncy ball',
   ],
   medium: [
@@ -63,7 +63,7 @@ const AI_WORDS = {
     'golem', 'vampire', 'werewolf', 'wraith', 'demon', 'inferno', 'glacier',
     'tidal wave', 'geyser', 'meteor', 'plasma', 'napalm', 'radiation',
     'solar flare', 'sonic boom', 'shockwave', 'black ice', 'lava', 'magma',
-    'thunder', 'hailstorm', 'earthquake', 'wildfire', 'blight', 'miasma',
+    'thunder', 'hailstorm', 'blight', 'miasma',
     'famine', 'drought', 'eclipse', 'tremor', 'comet', 'gamma ray', 'emp pulse',
     'uranium', 'mercury', 'acid rain', 'permafrost', 'landmine', 'catapult',
     'trebuchet', 'battering ram', 'ballista', 'flamethrower', 'grenade',
@@ -242,6 +242,13 @@ export default function TicTacNo() {
   }, [gamePhase]);
 
   useEffect(() => {
+    fetch(`${API}/api/words`)
+      .then(r => r.json())
+      .then(data => setAiWords(data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     (async () => {
       try {
         const { AdMob } = await import('@capacitor-community/admob');
@@ -300,6 +307,7 @@ export default function TicTacNo() {
   });
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [myRPDelta, setMyRPDelta] = useState<number | null>(null);
+  const [aiWords, setAiWords] = useState(AI_WORDS_FALLBACK);
   const [setupStep, setSetupStep] = useState<'mode' | 'config'>('mode');
   const lbContainerRef = useRef<HTMLDivElement>(null);
   const lbUserRowRef = useRef<HTMLDivElement>(null);
@@ -708,7 +716,7 @@ export default function TicTacNo() {
     if (attackable.length === 0) return;
 
     const { difficulty } = players[aiPlayerIndex];
-    const words = AI_WORDS[difficulty];
+    const words = aiWords[difficulty];
     const available = words.filter(w => !usedWordsRef.current.has(w.toLowerCase()));
     const wordPool = available.length > 0 ? available : words;
     const obj = wordPool[Math.floor(Math.random() * wordPool.length)];
@@ -765,7 +773,7 @@ export default function TicTacNo() {
     }
 
     placePiece(spot, obj, aiPlayerIndex, currentBoard);
-  }, [placePiece, players]);
+  }, [placePiece, players, aiWords]);
 
   const resetGame = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
