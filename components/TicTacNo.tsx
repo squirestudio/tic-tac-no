@@ -752,8 +752,8 @@ export default function TicTacNo() {
 
     let spot: number;
     if (difficulty === 'easy') {
-      // 20% chance to attack a random occupied cell, otherwise prefer empty
-      if (occupied.length > 0 && Math.random() < 0.2) {
+      // 35% chance to attack a random occupied cell, otherwise prefer empty
+      if (occupied.length > 0 && Math.random() < 0.35) {
         spot = occupied[Math.floor(Math.random() * occupied.length)];
       } else {
         const pool = empty.length > 0 ? empty : occupied;
