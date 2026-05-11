@@ -1419,15 +1419,15 @@ export default function TicTacNo() {
                   </div>
                 </div>
                 {/* Ranked / Casual toggle */}
-                <div className="flex rounded-xl overflow-hidden border border-white/10">
+                <div className="flex rounded-xl overflow-hidden border border-white/20 bg-slate-800/60">
                   <button
                     onClick={() => setIsRanked(false)}
-                    className={`flex-1 py-2.5 text-sm font-bold transition-all ${!isRanked ? 'bg-slate-600 text-white' : 'text-white/40 hover:text-white/60'}`}>
+                    className={`flex-1 py-2.5 text-sm font-bold transition-all ${!isRanked ? 'bg-slate-600 text-white' : 'text-white/60'}`}>
                     Casual
                   </button>
                   <button
                     onClick={() => setIsRanked(true)}
-                    className={`flex-1 py-2.5 text-sm font-bold transition-all ${isRanked ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white' : 'text-white/40 hover:text-white/60'}`}>
+                    className={`flex-1 py-2.5 text-sm font-bold transition-all ${isRanked ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white' : 'text-white/60'}`}>
                     Ranked
                   </button>
                 </div>
