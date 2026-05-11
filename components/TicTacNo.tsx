@@ -1411,7 +1411,7 @@ export default function TicTacNo() {
                   <button
                     onClick={() => setIsRanked(true)}
                     className={`flex-1 py-2.5 text-sm font-bold transition-all ${isRanked ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white' : 'text-white/40 hover:text-white/60'}`}>
-                    ⚔️ Ranked
+                    Ranked
                   </button>
                 </div>
 
@@ -1717,14 +1717,14 @@ export default function TicTacNo() {
                 <div className="text-center">
                   <div className="flex justify-around items-center mb-5">
                     <CombatantCard word={battleAnimation.defenderObject} owner={battleAnimation.defenderOwner} label="Defending" img={defImg} />
-                    <div className="text-4xl font-black text-yellow-400 animate-pulse self-center">⚔️</div>
+                    <div className="text-4xl font-black text-yellow-400 animate-pulse self-center">VS</div>
                     <CombatantCard word={battleAnimation.challenger} owner={battleAnimation.challengerOwner} label="Attacking" img={atkImg} />
                   </div>
                   <div className="p-4 bg-slate-900/50 rounded-xl border-2 border-yellow-500">
                     {battleAnimation.winner ? (
                       <p className="text-lg text-yellow-400 font-bold mb-2">🏆 {battleAnimation.winner.toUpperCase()} WINS!</p>
                     ) : (
-                      <p className="text-lg text-yellow-400 font-bold mb-2 animate-pulse">⚔️ BATTLE IN PROGRESS...</p>
+                      <p className="text-lg text-yellow-400 font-bold mb-2 animate-pulse">BATTLE IN PROGRESS...</p>
                     )}
                     {battleNarrative ? (
                       <p className="text-gray-200 text-sm leading-relaxed">{battleNarrative}</p>
@@ -1772,12 +1772,12 @@ export default function TicTacNo() {
           <img src="/logo.png" alt="Tic Attack Toe" className="h-36" />
           <div className="flex gap-2 items-center">
             <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isMultiplayer || isRanked ? 'bg-purple-700/80 text-white' : 'bg-slate-700 text-white/40'}`}>
-              {isMultiplayer || isRanked ? '⚔️ Ranked' : 'Casual'}
+              {isMultiplayer || isRanked ? 'Ranked' : 'Casual'}
             </span>
             {battleLog.length > 0 && (
               <button onClick={() => setShowBattleLog(v => !v)}
                 className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1.5 rounded-lg text-xs font-bold">
-                ⚔️ {battleLog.length}
+                {battleLog.length}
               </button>
             )}
             {!isMultiplayer && <button onClick={restartGame} disabled={isGenerating}
