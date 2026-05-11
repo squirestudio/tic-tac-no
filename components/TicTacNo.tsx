@@ -724,9 +724,26 @@ export default function TicTacNo() {
     if (attackable.length === 0) return;
 
     const { difficulty } = players[aiPlayerIndex];
-    const words = aiWords[difficulty];
-    const available = words.filter(w => !usedWordsRef.current.has(w.toLowerCase()));
-    const wordPool = available.length > 0 ? available : words;
+
+    // In ranked mode, word pool scales to the human opponent's RP so the AI
+    // gets progressively harder as the player climbs the ladder.
+    const humanPlayer = isRanked ? players.find(p => !p.isAI && p.profileUUID) : undefined;
+    const humanRP = humanPlayer ? (leaderboard[humanPlayer.profileUUID!]?.rp ?? 0) : 0;
+
+    let basePool: string[];
+    if (isRanked && humanPlayer) {
+      const r = Math.random() * 100;
+      if      (humanRP < 300)  basePool = aiWords.easy;
+      else if (humanRP < 600)  basePool = r < 60 ? aiWords.easy : aiWords.medium;
+      else if (humanRP < 1000) basePool = r < 20 ? aiWords.easy : aiWords.medium;
+      else if (humanRP < 1500) basePool = aiWords.medium;
+      else                     basePool = r < 40 ? aiWords.medium : aiWords.hard;
+    } else {
+      basePool = aiWords[difficulty];
+    }
+
+    const available = basePool.filter(w => !usedWordsRef.current.has(w.toLowerCase()));
+    const wordPool = available.length > 0 ? available : basePool;
     const obj = wordPool[Math.floor(Math.random() * wordPool.length)];
 
     const empty = attackable.filter(idx => currentBoard[idx] === null);
@@ -781,7 +798,7 @@ export default function TicTacNo() {
     }
 
     placePiece(spot, obj, aiPlayerIndex, currentBoard);
-  }, [placePiece, players, aiWords]);
+  }, [placePiece, players, aiWords, isRanked, leaderboard]);
 
   const resetGame = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
