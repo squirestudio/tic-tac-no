@@ -1,5 +1,7 @@
 import { Redis } from '@upstash/redis';
 
+export const revalidate = 0;
+
 const redis =
   process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
     ? new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN })
