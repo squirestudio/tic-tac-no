@@ -226,6 +226,7 @@ export default function TicTacNo() {
   const [mpConnectionLost, setMpConnectionLost] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [showBattleLog, setShowBattleLog] = useState(false);
+  const [isRanked, setIsRanked] = useState(true);
 
   useEffect(() => {
     if (selectedCell !== null && !players[currentPlayer].isAI) {
@@ -486,6 +487,7 @@ export default function TicTacNo() {
 
   useEffect(() => {
     if (gamePhase !== 'gameOver' || winner === null) return;
+    if (gameMode === 'local' && !isRanked) return;
 
     const signedInPlayers = players.filter(p => !p.isAI && p.profileUUID);
     if (signedInPlayers.length === 0) return;
@@ -513,7 +515,7 @@ export default function TicTacNo() {
 
     Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gamePhase, winner]);
+  }, [gamePhase, winner, gameMode, isRanked]);
 
   const CACHE_KEY = 'ttn_image_cache';
   const [imageCache, setImageCache] = useState<Record<string, string>>(() => {
@@ -1399,12 +1401,28 @@ export default function TicTacNo() {
                     }} className="text-xl">⚙️</button>
                   </div>
                 </div>
+                {/* Ranked / Casual toggle */}
+                <div className="flex rounded-xl overflow-hidden border border-white/10">
+                  <button
+                    onClick={() => setIsRanked(false)}
+                    className={`flex-1 py-2.5 text-sm font-bold transition-all ${!isRanked ? 'bg-slate-600 text-white' : 'text-white/40 hover:text-white/60'}`}>
+                    Casual
+                  </button>
+                  <button
+                    onClick={() => setIsRanked(true)}
+                    className={`flex-1 py-2.5 text-sm font-bold transition-all ${isRanked ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white' : 'text-white/40 hover:text-white/60'}`}>
+                    ⚔️ Ranked
+                  </button>
+                </div>
+
                 {/* Buttons */}
                 <button
                   onClick={() => setSetupStep('config')}
                   className="w-full py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-lg rounded-xl transition-all">
                   Play
-                  <span className="block text-sm font-normal opacity-70">Local / AI</span>
+                  <span className="block text-sm font-normal opacity-70">
+                    {isRanked ? 'Local / AI' : 'Local / AI · No RP'}
+                  </span>
                 </button>
                 <button
                   onClick={() => { setMpPhase('lobby'); setMpError(''); setJoinCodeInput(''); }}
@@ -1752,7 +1770,10 @@ export default function TicTacNo() {
             <ArrowLeft size={18} />
           </button>
           <img src="/logo.png" alt="Tic Attack Toe" className="h-36" />
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isMultiplayer || isRanked ? 'bg-purple-700/80 text-white' : 'bg-slate-700 text-white/40'}`}>
+              {isMultiplayer || isRanked ? '⚔️ Ranked' : 'Casual'}
+            </span>
             {battleLog.length > 0 && (
               <button onClick={() => setShowBattleLog(v => !v)}
                 className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1.5 rounded-lg text-xs font-bold">
@@ -1915,11 +1936,13 @@ export default function TicTacNo() {
                 <div className="h-2 rounded-full bg-white/10 overflow-hidden mb-3">
                   <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
                 </div>
-                {myRPDelta !== null && (
+                {myRPDelta !== null ? (
                   <p className={`text-sm font-black ${myRPDelta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                     {myRPDelta >= 0 ? `+${myRPDelta}` : myRPDelta} RP {myRPDelta >= 0 ? '↑' : '↓'}
                   </p>
-                )}
+                ) : gameMode === 'local' && !isRanked ? (
+                  <p className="text-xs text-white/30 font-bold">Casual · No RP earned</p>
+                ) : null}
               </div>
             );
           })()}
