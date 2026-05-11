@@ -243,7 +243,11 @@ export default function TicTacNo() {
   }, [gamePhase]);
 
   useEffect(() => {
-    fetch(`${API}/api/words`)
+    fetch(`${API}/api/words`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'words' }),
+    })
       .then(r => r.json())
       .then(data => setAiWords(data))
       .catch(() => {});
@@ -670,10 +674,10 @@ export default function TicTacNo() {
         fetchBattleNarrative(object, existing.object, (winnerWord) => {
           const challengerWon = winnerWord.toLowerCase() === object.toLowerCase();
           const loserWord = challengerWon ? existing.object : object;
-          fetch(`${API}/api/words/record`, {
+          fetch(`${API}/api/words`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ winner: winnerWord, loser: loserWord }),
+            body: JSON.stringify({ action: 'record', winner: winnerWord, loser: loserWord }),
           }).catch(() => {});
           const newBoard = [...currentBoard];
           if (challengerWon) newBoard[index] = newCell;

@@ -1,6 +1,6 @@
 import { Redis } from '@upstash/redis';
 
-export const revalidate = 0;
+export const maxDuration = 10;
 
 const redis =
   process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
@@ -66,24 +66,68 @@ const FALLBACK = {
   ],
 };
 
-export async function GET() {
-  if (!redis) return Response.json(FALLBACK);
+// Single POST handler handles all actions to avoid GET handler static-export conflict.
+// action: 'words'  → return AI word lists from Redis
+// action: 'record' → record battle winner/loser
+// action: 'stats'  → return win-rate table
+export async function POST(req: Request) {
+  const body = await req.json();
+  const { action } = body;
 
-  try {
-    const [easy, medium, hard] = await Promise.all([
-      redis.get<string[]>('words:easy'),
-      redis.get<string[]>('words:medium'),
-      redis.get<string[]>('words:hard'),
-    ]);
-
-    return Response.json({
-      easy:   easy   ?? FALLBACK.easy,
-      medium: medium ?? FALLBACK.medium,
-      hard:   hard   ?? FALLBACK.hard,
-    });
-  } catch {
-    return Response.json(FALLBACK);
+  if (action === 'words') {
+    if (!redis) return Response.json(FALLBACK);
+    try {
+      const [easy, medium, hard] = await Promise.all([
+        redis.get<string[]>('words:easy'),
+        redis.get<string[]>('words:medium'),
+        redis.get<string[]>('words:hard'),
+      ]);
+      return Response.json({
+        easy:   easy   ?? FALLBACK.easy,
+        medium: medium ?? FALLBACK.medium,
+        hard:   hard   ?? FALLBACK.hard,
+      });
+    } catch {
+      return Response.json(FALLBACK);
+    }
   }
+
+  if (action === 'record') {
+    if (!redis) return Response.json({ error: 'no redis' }, { status: 503 });
+    const { winner, loser } = body;
+    if (!winner || !loser) return Response.json({ error: 'missing fields' }, { status: 400 });
+    const w = winner.toLowerCase().trim();
+    const l = loser.toLowerCase().trim();
+    await Promise.all([
+      redis.hincrby('word:plays', w, 1),
+      redis.hincrby('word:plays', l, 1),
+      redis.hincrby('word:wins',  w, 1),
+    ]);
+    return Response.json({ ok: true });
+  }
+
+  if (action === 'stats') {
+    if (!redis) return Response.json({ error: 'no redis' }, { status: 503 });
+    const minPlays = Number(body.minPlays ?? 10);
+    const limit    = Number(body.limit    ?? 50);
+    const [plays, wins] = await Promise.all([
+      redis.hgetall('word:plays'),
+      redis.hgetall('word:wins'),
+    ]);
+    if (!plays) return Response.json({ stats: [] });
+    const stats = Object.entries(plays)
+      .map(([word, playsVal]) => {
+        const p = Number(playsVal);
+        const w = Number((wins as Record<string, string> | null)?.[word] ?? 0);
+        return { word, plays: p, wins: w, winRate: p > 0 ? Math.round((w / p) * 1000) / 10 : 0 };
+      })
+      .filter(s => s.plays >= minPlays)
+      .sort((a, b) => b.winRate - a.winRate)
+      .slice(0, limit);
+    return Response.json({ stats });
+  }
+
+  return Response.json({ error: 'unknown action' }, { status: 400 });
 }
 
 export async function OPTIONS() {
