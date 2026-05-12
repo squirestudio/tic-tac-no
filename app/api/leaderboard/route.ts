@@ -52,11 +52,17 @@ export async function POST(req: Request) {
       if (!d) return null;
       return {
         uuid,
-        gamertag:    String(d.gamertag    ?? ''),
-        avatarUrl:   String(d.avatarUrl   ?? ''),
-        wins:        parseInt(String(d.wins        ?? '0')),
-        gamesPlayed: parseInt(String(d.gamesPlayed ?? '0')),
-        rp:          parseInt(String(d.rp          ?? '0')) || 0,
+        gamertag:     String(d.gamertag     ?? ''),
+        avatarUrl:    String(d.avatarUrl    ?? ''),
+        wins:         parseInt(String(d.wins         ?? '0')),
+        gamesPlayed:  parseInt(String(d.gamesPlayed  ?? '0')),
+        rp:           parseInt(String(d.rp           ?? '0')) || 0,
+        winsVsEasy:   parseInt(String(d.winsVsEasy   ?? '0')),
+        winsVsMedium: parseInt(String(d.winsVsMedium ?? '0')),
+        winsVsHard:   parseInt(String(d.winsVsHard   ?? '0')),
+        currentStreak: parseInt(String(d.currentStreak ?? '0')),
+        bestStreak:    parseInt(String(d.bestStreak    ?? '0')),
+        dayStreak:     parseInt(String(d.dayStreak     ?? '0')),
       };
     }));
     const result: Record<string, object> = {};
@@ -132,22 +138,49 @@ export async function POST(req: Request) {
     }
     const key = playerKey(uuid);
     const current = await redis.hgetall(key);
-    const currentRP = parseInt(String((current as Record<string, unknown>)?.rp ?? '0')) || 0;
+    const d = (current ?? {}) as Record<string, unknown>;
+    const currentRP = parseInt(String(d.rp ?? '0')) || 0;
 
     // Resolve opponent RPs server-side — never trust client-computed values
     const opponentRPs = await Promise.all(opponentIds.map(async opp => {
       if ('ai' in opp) return AI_RP[opp.ai];
-      const d = await redis!.hgetall(playerKey(opp.uuid));
-      return parseInt(String((d as Record<string, unknown>)?.rp ?? '0')) || 0;
+      const pd = await redis!.hgetall(playerKey(opp.uuid));
+      return parseInt(String((pd as Record<string, unknown>)?.rp ?? '0')) || 0;
     }));
     const rpChange = calcRPChange(won, currentRP, opponentRPs);
     const newRP = Math.max(0, currentRP + rpChange);
 
+    // Win streak
+    const currentStreak = parseInt(String(d.currentStreak ?? '0')) || 0;
+    const bestStreak    = parseInt(String(d.bestStreak    ?? '0')) || 0;
+    const newStreak     = won ? currentStreak + 1 : 0;
+    const newBestStreak = Math.max(bestStreak, newStreak);
+
+    // Day streak (Duolingo-style)
+    const today     = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const lastPlayed     = String(d.lastPlayedDate ?? '');
+    const currentDayStreak = parseInt(String(d.dayStreak ?? '0')) || 0;
+    const newDayStreak = lastPlayed === today     ? currentDayStreak :
+                         lastPlayed === yesterday ? currentDayStreak + 1 : 1;
+
+    // Per-difficulty win tracking (count game once per difficulty type present)
+    const hasEasyAI   = opponentIds.some(o => 'ai' in o && o.ai === 'easy');
+    const hasMediumAI = opponentIds.some(o => 'ai' in o && o.ai === 'medium');
+    const hasHardAI   = opponentIds.some(o => 'ai' in o && o.ai === 'hard');
+
     await Promise.all([
       redis.sadd(PLAYERS_SET, uuid),
-      redis.hset(key, { gamertag, avatarUrl, rp: newRP }),
+      redis.hset(key, {
+        gamertag, avatarUrl, rp: newRP,
+        currentStreak: newStreak, bestStreak: newBestStreak,
+        dayStreak: newDayStreak, lastPlayedDate: today,
+      }),
       redis.hincrby(key, 'gamesPlayed', 1),
-      won ? redis.hincrby(key, 'wins', 1) : Promise.resolve(0),
+      won                    ? redis.hincrby(key, 'wins',        1) : Promise.resolve(0),
+      won && hasEasyAI       ? redis.hincrby(key, 'winsVsEasy',   1) : Promise.resolve(0),
+      won && hasMediumAI     ? redis.hincrby(key, 'winsVsMedium', 1) : Promise.resolve(0),
+      won && hasHardAI       ? redis.hincrby(key, 'winsVsHard',   1) : Promise.resolve(0),
     ]);
     return Response.json({ ok: true, rp: newRP, rpChange });
   }

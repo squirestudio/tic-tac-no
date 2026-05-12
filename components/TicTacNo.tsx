@@ -17,7 +17,11 @@ type BattleAnimation = {
   defenderOwner: number;
   winner: string;
 };
-type PlayerStats = { wins: number; gamesPlayed: number; rp: number; gamertag: string; avatarUrl: string };
+type PlayerStats = {
+  wins: number; gamesPlayed: number; rp: number; gamertag: string; avatarUrl: string;
+  winsVsEasy: number; winsVsMedium: number; winsVsHard: number;
+  currentStreak: number; bestStreak: number; dayStreak: number;
+};
 type LeaderboardData = { [uuid: string]: PlayerStats };
 type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
 type MpPlayer = { uuid: string; gamertag: string; avatarUrl: string; slot: number; color: string };
@@ -142,17 +146,28 @@ function calcRPChange(won: boolean, myRP: number, opponentRPs: number[]): number
   return -Math.max(5, Math.min(50, Math.round(20 - diff / 10)));
 }
 
-type RankInfo = { tier: 'bronze' | 'silver' | 'gold'; level: 1 | 2 | 3; label: string; minRP: number; maxRP: number };
+type RankInfo = { tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'titanium' | 'obsidian' | 'diamond'; level: 1 | 2 | 3; label: string; minRP: number; maxRP: number };
 const RANKS: RankInfo[] = [
-  { tier: 'bronze', level: 1, label: 'Bronze I',   minRP: 0,   maxRP: 99   },
-  { tier: 'bronze', level: 2, label: 'Bronze II',  minRP: 100, maxRP: 199  },
-  { tier: 'bronze', level: 3, label: 'Bronze III', minRP: 200, maxRP: 299  },
-  { tier: 'silver', level: 1, label: 'Silver I',   minRP: 300, maxRP: 399  },
-  { tier: 'silver', level: 2, label: 'Silver II',  minRP: 400, maxRP: 499  },
-  { tier: 'silver', level: 3, label: 'Silver III', minRP: 500, maxRP: 599  },
-  { tier: 'gold',   level: 1, label: 'Gold I',     minRP: 600, maxRP: 699  },
-  { tier: 'gold',   level: 2, label: 'Gold II',    minRP: 700, maxRP: 799  },
-  { tier: 'gold',   level: 3, label: 'Gold III',   minRP: 800, maxRP: Infinity },
+  { tier: 'bronze',   level: 1, label: 'Bronze I',      minRP: 0,     maxRP: 99    },
+  { tier: 'bronze',   level: 2, label: 'Bronze II',     minRP: 100,   maxRP: 199   },
+  { tier: 'bronze',   level: 3, label: 'Bronze III',    minRP: 200,   maxRP: 299   },
+  { tier: 'silver',   level: 1, label: 'Silver I',      minRP: 300,   maxRP: 399   },
+  { tier: 'silver',   level: 2, label: 'Silver II',     minRP: 400,   maxRP: 499   },
+  { tier: 'silver',   level: 3, label: 'Silver III',    minRP: 500,   maxRP: 599   },
+  { tier: 'gold',     level: 1, label: 'Gold I',        minRP: 600,   maxRP: 699   },
+  { tier: 'gold',     level: 2, label: 'Gold II',       minRP: 700,   maxRP: 799   },
+  { tier: 'platinum', level: 1, label: 'Platinum I',    minRP: 800,   maxRP: 999   },
+  { tier: 'platinum', level: 2, label: 'Platinum II',   minRP: 1000,  maxRP: 1199  },
+  { tier: 'platinum', level: 3, label: 'Platinum III',  minRP: 1200,  maxRP: 1399  },
+  { tier: 'titanium', level: 1, label: 'Titanium I',    minRP: 1400,  maxRP: 1699  },
+  { tier: 'titanium', level: 2, label: 'Titanium II',   minRP: 1700,  maxRP: 1999  },
+  { tier: 'titanium', level: 3, label: 'Titanium III',  minRP: 2000,  maxRP: 2499  },
+  { tier: 'obsidian', level: 1, label: 'Obsidian I',    minRP: 2500,  maxRP: 2999  },
+  { tier: 'obsidian', level: 2, label: 'Obsidian II',   minRP: 3000,  maxRP: 3499  },
+  { tier: 'obsidian', level: 3, label: 'Obsidian III',  minRP: 3500,  maxRP: 4999  },
+  { tier: 'diamond',  level: 1, label: 'Diamond I',     minRP: 5000,  maxRP: 7499  },
+  { tier: 'diamond',  level: 2, label: 'Diamond II',    minRP: 7500,  maxRP: 9999  },
+  { tier: 'diamond',  level: 3, label: 'Diamond III',   minRP: 10000, maxRP: Infinity },
 ];
 
 function getRank(rp: number): RankInfo {
@@ -160,10 +175,121 @@ function getRank(rp: number): RankInfo {
 }
 
 const TIER_DISPLAY = {
-  gold:   { emoji: '🥇', color: '#FFD700' },
-  silver: { emoji: '🥈', color: '#C0C0C0' },
-  bronze: { emoji: '🥉', color: '#CD7F32' },
+  bronze:   { emoji: '🥉', color: '#CD7F32' },
+  silver:   { emoji: '🥈', color: '#C0C0C0' },
+  gold:     { emoji: '🥇', color: '#FFD700' },
+  platinum: { emoji: '🔘', color: '#E5E4E2' },
+  titanium: { emoji: '⚙️', color: '#90A4AE' },
+  obsidian: { emoji: '🌑', color: '#9C27B0' },
+  diamond:  { emoji: '💎', color: '#00E5FF' },
 };
+
+const BADGES = [
+  { id: 'first_blood',  emoji: '🩸', name: 'First Blood',         desc: 'Win your very first game. Every legend has to start somewhere.',                                     color: '#EF4444' },
+  { id: 'big_easy',     emoji: '😎', name: 'The Big Easy',         desc: 'Win 25 games against Easy AI opponents. Show those soft-worders who\'s boss.',                      color: '#10B981' },
+  { id: 'hard_attack',  emoji: '💥', name: 'Hard Attack',          desc: 'Win 25 games against Hard AI opponents. Defeating cosmic forces takes serious skill.',              color: '#F97316' },
+  { id: 'hat_trick',    emoji: '🎩', name: 'Hat Trick',            desc: 'Win 3 games in a row without losing. Momentum is everything.',                                     color: '#8B5CF6' },
+  { id: 'on_fire',      emoji: '🔥', name: 'On Fire',              desc: 'Win 5 games in a row without losing. You\'re unstoppable right now.',                              color: '#FB923C' },
+  { id: 'gold_digger',  emoji: '🥇', name: 'Gold Digger',          desc: 'Reach Gold rank (600 RP). You\'ve climbed past the silver and proven your worth.',                 color: '#FFD700' },
+  { id: 'diamond',      emoji: '💎', name: 'Diamond in the Rough', desc: 'Reach Diamond rank (5,000 RP). Only the elite make it this far. Truly rare.',                      color: '#00E5FF' },
+  { id: 'flawless',     emoji: '✨', name: 'Flawless',             desc: 'Win a game without losing a single battle. Your words dominated every confrontation.',             color: '#A78BFA' },
+  { id: 'lone_wolf',    emoji: '🐺', name: 'Lone Wolf',            desc: 'Win a 3-player game against two AI opponents. No teammates — just you against the machines.',      color: '#94A3B8' },
+  { id: 'high_roller',          emoji: '🎲', name: 'High Roller',          desc: 'Earn 50 or more RP in a single ranked game. Big risk, big reward.',                                      color: '#F59E0B' },
+  { id: 'medium_rare',          emoji: '🥩', name: 'Medium Rare',          desc: 'Win 25 games against Medium AI opponents. A step up from the basics.',                                   color: '#D97706' },
+  { id: 'century_club',         emoji: '🏅', name: 'Century Club',          desc: 'Win 100 games total. Centurion status achieved.',                                                         color: '#60A5FA' },
+  { id: 'silver_tongue',        emoji: '🥈', name: 'Silver Tongue',         desc: 'Reach Silver rank (300 RP). Your wordplay is starting to shine.',                                         color: '#C0C0C0' },
+  { id: 'full_house',           emoji: '🃏', name: 'Full House',            desc: 'Win a game where all 9 squares are filled. No space left on the board.',                                 color: '#EC4899' },
+  { id: 'speed_demon',          emoji: '⚡', name: 'Speed Demon',           desc: 'Win a game in 3 moves or fewer. Efficiency is its own kind of power.',                                   color: '#FBBF24' },
+  { id: 'social_distancing',    emoji: '🤚', name: 'Social Distancing',     desc: 'Win a game without initiating a single battle. Pure placement strategy.',                                color: '#34D399' },
+  { id: 'occupational_hazard',  emoji: '⚠️', name: 'Occupational Hazard',  desc: 'Win a game after initiating 5 or more battles. You love a good fight.',                                 color: '#EF4444' },
+  { id: 'terminator',           emoji: '☠️', name: 'Terminator',           desc: 'Win the game by battling for the final square. Your last move was a conquest.',                          color: '#6B7280' },
+  { id: 'triple_threat',        emoji: '⚔️', name: 'Triple Threat',        desc: 'Win by battling for all 3 squares in your winning line. Total battlefield domination.',                  color: '#A855F7' },
+  { id: 'party_crasher',        emoji: '🎊', name: 'Party Crasher',         desc: 'Win 5 multiplayer games as a non-host player. The host never sees it coming.',                           color: '#F472B6' },
+  { id: 'word_nerd',            emoji: '📚', name: 'Word Nerd',             desc: 'Use 10 words with 12 or more characters. Big vocabulary, bigger wins.',                                  color: '#818CF8' },
+  { id: 'underdog',             emoji: '🐶', name: 'Underdog',              desc: 'Win a ranked game when all opponents have more RP than you. Believe in yourself.',                       color: '#FB923C' },
+  { id: 'the_blocker',          emoji: '🛡️', name: 'The Blocker',          desc: 'Place on a square that would have given your opponent a winning move. Clutch defense.',                  color: '#0EA5E9' },
+  { id: 'veteran',              emoji: '🎖️', name: 'Veteran',              desc: 'Play 50 games. Every battle makes you stronger.',                                                         color: '#D4AF37' },
+  { id: 'unstoppable',          emoji: '🌪️', name: 'Unstoppable',          desc: "Reach a win streak of 10. Once you start winning, you just can't stop.",                                 color: '#A855F7' },
+];
+
+function getBadgeInfo(id: string, stats: PlayerStats | undefined, localBadges: Set<string>, localCounts?: { party_crasher_count?: number; word_nerd_count?: number }): { progress: number; earned: boolean; detail: string } {
+  const rp = stats?.rp ?? 0;
+  switch (id) {
+    case 'first_blood':          { const n = Math.min(stats?.wins ?? 0, 1);    const e = n >= 1;   return { progress: n,                     earned: e, detail: e ? 'Earned!' : `${stats?.wins ?? 0}/1 win` }; }
+    case 'big_easy':             { const n = stats?.winsVsEasy   ?? 0;         const e = n >= 25;  return { progress: Math.min(n,25)/25,     earned: e, detail: e ? 'Earned!' : `${n}/25` }; }
+    case 'medium_rare':          { const n = stats?.winsVsMedium ?? 0;         const e = n >= 25;  return { progress: Math.min(n,25)/25,     earned: e, detail: e ? 'Earned!' : `${n}/25` }; }
+    case 'hard_attack':          { const n = stats?.winsVsHard   ?? 0;         const e = n >= 25;  return { progress: Math.min(n,25)/25,     earned: e, detail: e ? 'Earned!' : `${n}/25` }; }
+    case 'century_club':         { const n = stats?.wins          ?? 0;         const e = n >= 100; return { progress: Math.min(n,100)/100,   earned: e, detail: e ? 'Earned!' : `${n}/100 wins` }; }
+    case 'veteran':              { const n = stats?.gamesPlayed   ?? 0;         const e = n >= 50;  return { progress: Math.min(n,50)/50,     earned: e, detail: e ? 'Earned!' : `${n}/50 games` }; }
+    case 'hat_trick':            { const n = stats?.bestStreak    ?? 0;         const e = n >= 3;   return { progress: Math.min(n,3)/3,       earned: e, detail: e ? 'Earned!' : `${n}/3 streak` }; }
+    case 'on_fire':              { const n = stats?.bestStreak    ?? 0;         const e = n >= 5;   return { progress: Math.min(n,5)/5,       earned: e, detail: e ? 'Earned!' : `${n}/5 streak` }; }
+    case 'unstoppable':          { const n = stats?.bestStreak    ?? 0;         const e = n >= 10;  return { progress: Math.min(n,10)/10,     earned: e, detail: e ? 'Earned!' : `${n}/10 streak` }; }
+    case 'silver_tongue':        { const e = rp >= 300;  return { progress: Math.min(rp,300)/300,    earned: e, detail: e ? 'Earned!' : `${rp}/300 RP` }; }
+    case 'gold_digger':          { const e = rp >= 600;  return { progress: Math.min(rp,600)/600,    earned: e, detail: e ? 'Earned!' : `${rp}/600 RP` }; }
+    case 'diamond':              { const e = rp >= 5000; return { progress: Math.min(rp,5000)/5000,  earned: e, detail: e ? 'Earned!' : `${rp}/5,000 RP` }; }
+    case 'party_crasher':        { const n = localCounts?.party_crasher_count ?? 0; const e = localBadges.has('party_crasher'); return { progress: e ? 1 : Math.min(n,5)/5, earned: e, detail: e ? 'Earned!' : `${n}/5 wins` }; }
+    case 'word_nerd':            { const n = localCounts?.word_nerd_count ?? 0;     const e = localBadges.has('word_nerd');     return { progress: e ? 1 : Math.min(n,10)/10, earned: e, detail: e ? 'Earned!' : `${n}/10 words` }; }
+    case 'flawless':
+    case 'lone_wolf':
+    case 'high_roller':
+    case 'full_house':
+    case 'speed_demon':
+    case 'social_distancing':
+    case 'occupational_hazard':
+    case 'terminator':
+    case 'triple_threat':
+    case 'underdog':
+    case 'the_blocker':          { const e = localBadges.has(id); return { progress: e ? 1 : 0, earned: e, detail: e ? 'Earned!' : 'Keep playing' }; }
+    default: return { progress: 0, earned: false, detail: '' };
+  }
+}
+
+function BadgeRing({ emoji, imgSrc, color, progress, earned, size, strokeWidth }: {
+  emoji: string; imgSrc?: string; color: string; progress: number; earned: boolean; size: number; strokeWidth: number;
+}) {
+  const r = (size / 2) - strokeWidth;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - Math.max(0, Math.min(1, progress)));
+  const cx = size / 2;
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={strokeWidth} />
+        <circle cx={cx} cy={cx} r={r} fill="none"
+          stroke={earned ? color : 'rgba(255,255,255,0.18)'}
+          strokeWidth={strokeWidth} strokeLinecap="round"
+          strokeDasharray={circ} strokeDashoffset={offset}
+          style={{ transition: 'stroke-dashoffset 1.2s ease' }}
+        />
+      </svg>
+      <div className={`absolute inset-0 flex items-center justify-center ${earned ? '' : 'grayscale opacity-30'}`}>
+        {imgSrc
+          ? <img src={imgSrc} alt={emoji} style={{ width: size - strokeWidth * 3, height: size - strokeWidth * 3, objectFit: 'contain' }} />
+          : <span style={{ fontSize: size * 0.38 }}>{emoji}</span>}
+      </div>
+      {earned && size >= 100 && (
+        <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-green-500 border-2 border-slate-900 flex items-center justify-center text-[11px] text-white font-black">✓</div>
+      )}
+    </div>
+  );
+}
+
+function BadgeCircle({ emoji, imgSrc, name, color, progress, earned, detail, onClick }: {
+  emoji: string; imgSrc?: string; name: string; color: string; progress: number; earned: boolean; detail: string; onClick?: () => void;
+}) {
+  return (
+    <button className="flex flex-col items-center gap-1 w-[72px]" onClick={onClick}>
+      <div className="relative">
+        <BadgeRing emoji={emoji} imgSrc={imgSrc} color={color} progress={progress} earned={earned} size={72} strokeWidth={5} />
+        {earned && (
+          <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 border border-slate-900 flex items-center justify-center text-[9px] text-white font-black">✓</div>
+        )}
+      </div>
+      <p className={`text-[10px] font-bold text-center leading-tight ${earned ? 'text-white' : 'text-white/30'}`}>{name}</p>
+      <p className={`text-[9px] text-center ${earned ? 'text-white/50' : 'text-white/20'}`}>{detail}</p>
+    </button>
+  );
+}
 
 function checkWinner(board: Cell[]) {
   for (const [a, b, c] of WIN_LINES) {
@@ -191,12 +317,31 @@ export default function TicTacNo() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [battleLog, setBattleLog] = useState<Array<{ challenger: string; defender: string; winner: string; spot: number }>>([]);
   const [winner, setWinner] = useState<number | null>(null);
+  const [showBoardResult, setShowBoardResult] = useState(false);
   const [battleAnimation, setBattleAnimation] = useState<BattleAnimation | null>(null);
   const [battleNarrative, setBattleNarrative] = useState('');
   const [lastMove, setLastMove] = useState<{ player: string; action: string; type: string } | null>(null);
   const [wordError, setWordError] = useState('');
   const pendingContinuationRef = useRef<(() => void) | null>(null);
   const usedWordsRef = useRef<Set<string>>(new Set());
+  const humanBattleLossRef = useRef(false);
+  const humanMoveCountRef = useRef(0);
+  const humanAttackCountRef = useRef(0);
+  const battleWonSquaresRef = useRef<Set<number>>(new Set());
+  const winningMoveWasBattleRef = useRef(false);
+  const humanBlockedWinRef = useRef(false);
+  const [localBadges, setLocalBadges] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
+      return new Set<string>(Object.keys(stored).filter(k => stored[k]));
+    } catch { return new Set<string>(); }
+  });
+  const [localCounts, setLocalCounts] = useState<{ party_crasher_count: number; word_nerd_count: number }>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('tat_badge_counts') ?? '{}');
+      return { party_crasher_count: stored.party_crasher_count ?? 0, word_nerd_count: stored.word_nerd_count ?? 0 };
+    } catch { return { party_crasher_count: 0, word_nerd_count: 0 }; }
+  });
   const pendingImages = useRef<Set<string>>(new Set());
   const validationCache = useRef<Map<string, boolean>>(new Map());
   const inputRef = useRef<HTMLInputElement>(null);
@@ -288,6 +433,8 @@ export default function TicTacNo() {
     catch { return null; }
   });
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
   const [psGamertag, setPsGamertag] = useState('');
   const [psAvatarWord, setPsAvatarWord] = useState('');
   const [psAvatarUrl, setPsAvatarUrl] = useState('');
@@ -397,6 +544,7 @@ export default function TicTacNo() {
 
       if (state.phase === 'gameOver') {
         setWinner(state.winner);
+        setShowBoardResult(true);
         setGamePhase('gameOver');
         setIsGenerating(false);
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -521,6 +669,100 @@ export default function TicTacNo() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase, winner, gameMode, isRanked]);
 
+  // ── Per-game badge detection ───────────────────────────────────────────────
+  useEffect(() => {
+    if (gamePhase !== 'gameOver' || winner === null) return;
+    const profilePlayerIdx = players.findIndex(p => p.profileUUID && !p.isAI);
+    if (profilePlayerIdx < 0 || winner !== profilePlayerIdx) return;
+
+    const newBadges: string[] = [];
+
+    // Flawless: won without losing any battle
+    if (!humanBattleLossRef.current) newBadges.push('flawless');
+
+    // Lone Wolf: won vs exactly 2 AI opponents (no other humans)
+    const aiCount = players.filter(p => p.isAI).length;
+    if (players.length === 3 && aiCount === 2) newBadges.push('lone_wolf');
+
+    // Full House: all 9 squares were filled at game end
+    if (board.every(c => c !== null)) newBadges.push('full_house');
+
+    // Speed Demon: won in 3 or fewer moves
+    if (humanMoveCountRef.current <= 3 && humanMoveCountRef.current > 0) newBadges.push('speed_demon');
+
+    // Social Distancing: won without initiating any battles
+    if (humanAttackCountRef.current === 0) newBadges.push('social_distancing');
+
+    // Occupational Hazard: won while having initiated 5+ battles
+    if (humanAttackCountRef.current >= 5) newBadges.push('occupational_hazard');
+
+    // Terminator: winning move was a battle
+    if (winningMoveWasBattleRef.current) newBadges.push('terminator');
+
+    // Triple Threat: all 3 squares in winning line were won by the profile player via battle
+    const winLine = WIN_LINES.find(([a, b, c]) =>
+      board[a]?.owner === profilePlayerIdx &&
+      board[b]?.owner === profilePlayerIdx &&
+      board[c]?.owner === profilePlayerIdx
+    );
+    if (winLine && winLine.every(idx => battleWonSquaresRef.current.has(idx))) newBadges.push('triple_threat');
+
+    // Party Crasher: win 5 multiplayer games as non-host
+    if (gameMode === 'multiplayer' && !mpIsHost) {
+      try {
+        const counts = JSON.parse(localStorage.getItem('tat_badge_counts') ?? '{}');
+        const newCount = (counts.party_crasher_count ?? 0) + 1;
+        counts.party_crasher_count = newCount;
+        localStorage.setItem('tat_badge_counts', JSON.stringify(counts));
+        setLocalCounts(prev => ({ ...prev, party_crasher_count: newCount }));
+        if (newCount >= 5) newBadges.push('party_crasher');
+      } catch {}
+    }
+
+    // Underdog: all opponents had more RP than the profile player in a ranked game
+    if (isRanked) {
+      const myStats = profile ? leaderboard[profile.uuid] : undefined;
+      const myRP = myStats?.rp ?? 0;
+      if (myRP > 0) {
+        const allOppsHigher = players
+          .filter(p => p.id !== profilePlayerIdx)
+          .every(opp => {
+            if (opp.isAI) return AI_RP[opp.difficulty] > myRP;
+            if (opp.profileUUID) return (leaderboard[opp.profileUUID]?.rp ?? 0) > myRP;
+            return false;
+          });
+        if (allOppsHigher) newBadges.push('underdog');
+      }
+    }
+
+    // The Blocker: placed on an opponent's would-be winning square
+    if (humanBlockedWinRef.current) newBadges.push('the_blocker');
+
+    if (newBadges.length > 0) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
+        const updated = { ...stored };
+        newBadges.forEach(b => { if (!updated[b]) updated[b] = true; });
+        localStorage.setItem('tat_badges', JSON.stringify(updated));
+        setLocalBadges(new Set(Object.keys(updated).filter(k => updated[k])));
+      } catch {}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase, winner]);
+
+  // High Roller: gain 50+ RP in a single game
+  useEffect(() => {
+    if (myRPDelta === null || myRPDelta < 50) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
+      if (!stored.high_roller) {
+        stored.high_roller = true;
+        localStorage.setItem('tat_badges', JSON.stringify(stored));
+        setLocalBadges(prev => new Set([...prev, 'high_roller']));
+      }
+    } catch {}
+  }, [myRPDelta]);
+
   const CACHE_KEY = 'ttn_image_cache';
   const [imageCache, setImageCache] = useState<Record<string, string>>(() => {
     try {
@@ -635,6 +877,16 @@ export default function TicTacNo() {
     fetchImage(object);
     if (currentBoard[index] !== null) fetchImage(currentBoard[index]!.object);
 
+    // Track per-game stats for the signed-in profile player
+    const profilePlayerIdx = players.findIndex(p => p.profileUUID && !p.isAI);
+    if (profilePlayerIdx >= 0 && playerMakingMove === profilePlayerIdx) {
+      humanMoveCountRef.current += 1;
+      if (currentBoard[index] !== null) humanAttackCountRef.current += 1;
+      // The Blocker: detect if this square would have given any opponent a win
+      const wouldBlock = players.some(opp => opp.id !== playerMakingMove && findWinMove(currentBoard, opp.id) === index);
+      if (wouldBlock) humanBlockedWinRef.current = true;
+    }
+
     setTimeout(() => {
       const newCell: Cell = { object, owner: playerMakingMove };
       usedWordsRef.current.add(object.toLowerCase());
@@ -648,6 +900,7 @@ export default function TicTacNo() {
         const gameWinner = checkWinner(newBoard);
         if (gameWinner !== null) {
           setWinner(gameWinner);
+          setShowBoardResult(true);
           setGamePhase('gameOver');
           setIsGenerating(false);
         } else {
@@ -684,6 +937,19 @@ export default function TicTacNo() {
           setBoard(newBoard);
           setBattleAnimation(prev => prev ? { ...prev, winner: winnerWord } : null);
 
+          // Track battle outcomes for the signed-in profile player
+          const profilePlayerIdxB = players.findIndex(p => p.profileUUID && !p.isAI);
+          if (profilePlayerIdxB >= 0) {
+            const profileLost =
+              (playerMakingMove === profilePlayerIdxB && !challengerWon) ||
+              (existing.owner === profilePlayerIdxB && challengerWon);
+            if (profileLost) humanBattleLossRef.current = true;
+            // Triple Threat: track squares the profile player won via battle
+            if (playerMakingMove === profilePlayerIdxB && challengerWon) {
+              battleWonSquaresRef.current.add(index);
+            }
+          }
+
           pendingContinuationRef.current = () => {
             setBattleLog(prev => [...prev, {
               challenger: object,
@@ -701,7 +967,13 @@ export default function TicTacNo() {
 
             const gameWinner = checkWinner(newBoard);
             if (gameWinner !== null) {
+              // Terminator: profile player won via a battle
+              const profIdx = players.findIndex(p => p.profileUUID && !p.isAI);
+              if (profIdx >= 0 && gameWinner === profIdx && playerMakingMove === profIdx && challengerWon) {
+                winningMoveWasBattleRef.current = true;
+              }
               setWinner(gameWinner);
+              setShowBoardResult(true);
               setGamePhase('gameOver');
               setIsGenerating(false);
             } else {
@@ -756,8 +1028,19 @@ export default function TicTacNo() {
 
     let spot: number;
     if (difficulty === 'easy') {
-      // 35% chance to attack a random occupied cell, otherwise prefer empty
-      if (occupied.length > 0 && Math.random() < 0.35) {
+      // Block any opponent who can win by claiming an empty cell (guaranteed win, no battle)
+      const emptyBlockMove = (() => {
+        for (const opp of players.filter(p => p.id !== aiPlayerIndex)) {
+          const b = findWinMove(currentBoard, opp.id);
+          if (b !== null && currentBoard[b] === null) return b;
+        }
+        return null;
+      })();
+
+      if (emptyBlockMove !== null) {
+        spot = emptyBlockMove;
+      } else if (occupied.length > 0 && Math.random() < 0.55) {
+        // 55% chance to attack a random occupied cell
         spot = occupied[Math.floor(Math.random() * occupied.length)];
       } else {
         const pool = empty.length > 0 ? empty : occupied;
@@ -823,6 +1106,13 @@ export default function TicTacNo() {
     setBattleNarrative('');
     setLastMove(null);
     setMyRPDelta(null);
+    setShowBoardResult(false);
+    humanBattleLossRef.current = false;
+    humanMoveCountRef.current = 0;
+    humanAttackCountRef.current = 0;
+    battleWonSquaresRef.current = new Set();
+    winningMoveWasBattleRef.current = false;
+    humanBlockedWinRef.current = false;
     setSetupStep('mode');
     pendingContinuationRef.current = null;
     usedWordsRef.current = new Set();
@@ -842,6 +1132,12 @@ export default function TicTacNo() {
     setLastMove(null);
     pendingContinuationRef.current = null;
     usedWordsRef.current = new Set();
+    humanBattleLossRef.current = false;
+    humanMoveCountRef.current = 0;
+    humanAttackCountRef.current = 0;
+    battleWonSquaresRef.current = new Set();
+    winningMoveWasBattleRef.current = false;
+    humanBlockedWinRef.current = false;
     if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
   };
 
@@ -903,6 +1199,23 @@ export default function TicTacNo() {
         // if validation fails open, allow through
       }
     }
+    // Word Nerd: track words with 12+ characters
+    if (wordKey.length >= 12) {
+      try {
+        const counts = JSON.parse(localStorage.getItem('tat_badge_counts') ?? '{}');
+        const newCount = (counts.word_nerd_count ?? 0) + 1;
+        counts.word_nerd_count = newCount;
+        localStorage.setItem('tat_badge_counts', JSON.stringify(counts));
+        setLocalCounts(prev => ({ ...prev, word_nerd_count: newCount }));
+        if (newCount >= 10 && !localBadges.has('word_nerd')) {
+          const badges = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
+          badges.word_nerd = true;
+          localStorage.setItem('tat_badges', JSON.stringify(badges));
+          setLocalBadges(prev => new Set([...prev, 'word_nerd']));
+        }
+      } catch {}
+    }
+
     if (gameModeRef.current === 'multiplayer') {
       await submitMpMove(selectedCell, word);
       setSelectedCell(null);
@@ -910,7 +1223,7 @@ export default function TicTacNo() {
     } else {
       placePiece(selectedCell, word, currentPlayer, board);
     }
-  }, [objectInput, isGenerating, selectedCell, currentPlayer, board, placePiece, submitMpMove]);
+  }, [objectInput, isGenerating, selectedCell, currentPlayer, board, placePiece, submitMpMove, localBadges]);
 
   // Keep refs in sync with state for use in callbacks
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
@@ -1387,6 +1700,130 @@ export default function TicTacNo() {
   if (gamePhase === 'setup') {
     return (
       <>
+      {/* ── Profile panel overlay ── */}
+      {showProfile && profile && (() => {
+        const stats = leaderboard[profile.uuid];
+        const rp = stats?.rp ?? 0;
+        const rank = getRank(rp);
+        const tierColor = TIER_DISPLAY[rank.tier].color;
+        const wins = stats?.wins ?? 0;
+        const gamesPlayed = stats?.gamesPlayed ?? 0;
+        const winPct = gamesPlayed > 0 ? Math.round((wins / gamesPlayed) * 100) : 0;
+        const currentStreak = stats?.currentStreak ?? 0;
+        const dayStreak = stats?.dayStreak ?? 0;
+        const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / (rank.maxRP - rank.minRP + 1)) * 100);
+        const rpToNext = rank.maxRP === Infinity ? null : rank.maxRP - rp + 1;
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col overflow-y-auto"
+            style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+            {/* Header bar */}
+            <div className="flex items-center justify-between px-5 pb-4 shrink-0">
+              <button onClick={() => setShowProfile(false)} className="text-white/50 hover:text-white text-2xl leading-none w-10">✕</button>
+              <p className="text-white font-black text-lg">Profile</p>
+              <div className="w-10" />
+            </div>
+
+            {/* Avatar + name + rank */}
+            <div className="flex flex-col items-center gap-2 pb-5 shrink-0">
+              {profile.avatarUrl
+                ? <img src={profile.avatarUrl} alt={profile.gamertag} className="w-24 h-24 rounded-full object-cover border-4" style={{ borderColor: tierColor }} />
+                : <div className="w-24 h-24 rounded-full bg-slate-700 border-4" style={{ borderColor: tierColor }} />}
+              <p className="text-white font-black text-2xl">{profile.gamertag}</p>
+              <p className="font-bold text-sm" style={{ color: tierColor }}>{rank.label}</p>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-3 px-5 pb-5 shrink-0">
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <p className="text-white font-black text-xl">{winPct}%</p>
+                <p className="text-white/40 text-xs mt-0.5">Win Rate</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <p className="text-white font-black text-xl">{currentStreak} 🔥</p>
+                <p className="text-white/40 text-xs mt-0.5">Win Streak</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <p className="text-white font-black text-xl">{dayStreak} 📅</p>
+                <p className="text-white/40 text-xs mt-0.5">Day Streak</p>
+              </div>
+            </div>
+
+            {/* RP progress bar */}
+            <div className="px-5 pb-6 shrink-0">
+              <div className="bg-white/5 rounded-xl p-4">
+                <div className="flex justify-between mb-2">
+                  <span className="font-bold text-sm" style={{ color: tierColor }}>{rank.label}</span>
+                  <span className="text-white/50 text-xs">{rp} RP{rpToNext ? ` · ${rpToNext} to next` : ' · MAX'}</span>
+                </div>
+                <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-1000"
+                    style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Badges section */}
+            <div className="px-5 pb-6">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="flex-1 h-px bg-white/10" />
+                <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Badges</p>
+                <div className="flex-1 h-px bg-white/10" />
+              </div>
+              <div className="grid grid-cols-3 gap-5 justify-items-center">
+                {BADGES.map(badge => {
+                  const { progress, earned, detail } = getBadgeInfo(badge.id, stats, localBadges, localCounts);
+                  const imgSrc = `/badges/${badge.id}.png`;
+                  return (
+                    <BadgeCircle key={badge.id} emoji={badge.emoji} imgSrc={imgSrc} name={badge.name}
+                      color={badge.color} progress={progress} earned={earned} detail={detail}
+                      onClick={() => setSelectedBadge(badge.id)} />
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Badge detail modal */}
+            {selectedBadge && (() => {
+              const badge = BADGES.find(b => b.id === selectedBadge)!;
+              const { progress, earned, detail } = getBadgeInfo(badge.id, stats, localBadges, localCounts);
+              const imgSrc = `/badges/${badge.id}.png`;
+              return (
+                <div className="fixed inset-0 z-60 flex items-center justify-center p-6"
+                  style={{ background: 'rgba(0,0,0,0.85)' }}
+                  onClick={() => setSelectedBadge(null)}>
+                  <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl"
+                    onClick={e => e.stopPropagation()}>
+                    {/* Large badge ring */}
+                    <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                      progress={progress} earned={earned} size={140} strokeWidth={8} />
+
+                    {/* Earned / locked status */}
+                    {earned
+                      ? <div className="px-4 py-1.5 rounded-full bg-green-500/20 border border-green-500/40">
+                          <p className="text-green-400 font-black text-sm">✓ Earned</p>
+                        </div>
+                      : <div className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10">
+                          <p className="text-white/40 font-bold text-sm">🔒 Locked · {detail}</p>
+                        </div>}
+
+                    {/* Badge name */}
+                    <p className="text-white font-black text-xl text-center">{badge.name}</p>
+
+                    {/* How to earn */}
+                    <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
+
+                    <button onClick={() => setSelectedBadge(null)}
+                      className="mt-2 w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
+                      Close
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
+
       <div className="h-[100dvh] bg-cover bg-center bg-no-repeat flex flex-col justify-end px-4"
         style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))', paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto w-full">
@@ -1398,7 +1835,7 @@ export default function TicTacNo() {
                 {/* Profile row */}
                 <div className="flex items-center justify-between">
                   {profile ? (
-                    <div className="flex items-center gap-3">
+                    <button className="flex items-center gap-3 text-left" onClick={() => setShowProfile(true)}>
                       {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />}
                       <div>
                         <p className="text-white font-bold text-sm">{profile.gamertag}</p>
@@ -1408,7 +1845,7 @@ export default function TicTacNo() {
                           return <p className="text-xs font-bold" style={{ color: TIER_DISPLAY[rank.tier].color }}>{rank.label} · {rp} RP</p>;
                         })()}
                       </div>
-                    </div>
+                    </button>
                   ) : (
                     <p className="text-white/40 text-sm">No profile</p>
                   )}
@@ -1577,7 +2014,7 @@ export default function TicTacNo() {
                     const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
                     const isMe = uuid === profile?.uuid;
                     const tierColor = TIER_DISPLAY[rank.tier].color;
-                    const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / 100) * 100);
+                    const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / (rank.maxRP - rank.minRP + 1)) * 100);
                     return (
                       <div key={uuid} ref={isMe ? lbUserRowRef : undefined}
                         className={`p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
@@ -1607,7 +2044,7 @@ export default function TicTacNo() {
                     <p className="text-white/30 text-xs text-center py-1">↓ {belowCount} player{belowCount !== 1 ? 's' : ''} below</p>
                   )}
                   <p className="text-white/30 text-xs text-center pt-1">
-                    Bronze I→III (0–299) · Silver I→III (300–599) · Gold I→III (600+)
+                    Bronze (0–299) · Silver (300–599) · Gold (600–799) · Platinum (800–1399) · Titanium (1400–2499) · Obsidian (2500–4999) · Diamond (5000+)
                   </p>
                 </div>
               );
@@ -1924,6 +2361,86 @@ export default function TicTacNo() {
     );
   }
 
+  // ── Board Result (final board shown before victory screen) ────────────────
+  if (gamePhase === 'gameOver' && winner !== null && showBoardResult) {
+    return (
+      <div
+        className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex flex-col items-center justify-center gap-3 p-3"
+        onClick={() => setShowBoardResult(false)}
+      >
+        <style>{`
+          @keyframes crownDrop {
+            0%   { transform: translateY(-70px); opacity: 0; }
+            60%  { transform: translateY(6px);   opacity: 1; }
+            80%  { transform: translateY(-4px); }
+            100% { transform: translateY(0);     opacity: 1; }
+          }
+          .crown-drop { animation: crownDrop 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+        `}</style>
+        {/* Player boxes with crown on winner */}
+        <div className="flex gap-2" style={{ width: 'min(calc(100vw - 24px), calc(100dvh - 310px))' }}>
+          {players.map((player, i) => (
+            <div key={i} className="flex-1 relative" style={{ paddingTop: '2rem' }}>
+              {i === winner && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 text-3xl crown-drop" style={{ pointerEvents: 'none' }}>
+                  👑
+                </div>
+              )}
+              <div
+                className="rounded-lg flex flex-col items-center justify-center py-1.5 font-bold"
+                style={{
+                  backgroundColor: player.color,
+                  opacity: i === winner ? 1 : 0.35,
+                  boxShadow: i === winner ? `0 0 20px ${player.color}` : 'none',
+                }}
+              >
+                <span className="text-white text-xs font-black">P{i + 1}</span>
+                <span className="text-white font-bold text-xs truncate w-full text-center px-1">{player.name}</span>
+                <span className="text-white/70 text-[9px]">{player.isAI ? 'AI' : 'YOU'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Final board (read-only) */}
+        <div className="aspect-square" style={{ width: 'min(calc(100vw - 24px), calc(100dvh - 310px))' }}>
+          <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full">
+            {board.map((cell, idx) => (
+              <div key={idx}
+                className="rounded-xl overflow-hidden border-2"
+                style={cell
+                  ? { borderColor: players[cell.owner].color, background: `linear-gradient(135deg, ${players[cell.owner].color}30, ${players[cell.owner].color}15)` }
+                  : { borderColor: '#4a5568', backgroundColor: 'rgba(51, 65, 85, 0.6)' }}>
+                {cell && (() => {
+                  const img = imageCache[cell.object.toLowerCase()];
+                  return img ? (
+                    <div className="relative w-full h-full">
+                      <img src={img} alt={cell.object} className="w-full h-full object-cover" />
+                      <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
+                        <p className="text-white text-xs font-bold text-center truncate">{cell.object}</p>
+                      </div>
+                      <div className="absolute top-1 right-1 w-2 h-2 rounded-full border border-black/30"
+                        style={{ backgroundColor: players[cell.owner].color }} />
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-1 relative">
+                      <p className="text-white font-bold text-xs text-center break-words px-1"
+                        style={{ textShadow: `0 0 8px ${players[cell.owner].color}` }}>
+                        {cell.object}
+                      </p>
+                      <div className="absolute bottom-1 right-1 w-2 h-2 rounded-full"
+                        style={{ backgroundColor: players[cell.owner].color }} />
+                    </div>
+                  );
+                })()}
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="text-white/40 text-sm animate-pulse">Tap anywhere to see results</p>
+      </div>
+    );
+  }
+
   // ── Game Over ──────────────────────────────────────────────────────────────
   if (gamePhase === 'gameOver' && winner !== null) {
     const winnerPlayer = players[winner];
@@ -1945,7 +2462,7 @@ export default function TicTacNo() {
             const rp = stats?.rp ?? 0;
             const rank = getRank(rp);
             const tierColor = TIER_DISPLAY[rank.tier].color;
-            const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / 100) * 100);
+            const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / (rank.maxRP - rank.minRP + 1)) * 100);
             const rpToNext = rank.maxRP === Infinity ? null : rank.maxRP - rp + 1;
             return (
               <div className="mb-6 p-4 rounded-xl bg-white/10 border border-white/20 text-center w-full max-w-xs mx-auto">
@@ -1983,24 +2500,32 @@ export default function TicTacNo() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={async () => {
-                gamesPlayedRef.current += 1;
-                if (gamesPlayedRef.current % 3 === 0 && interstitialReadyRef.current) {
-                  try {
-                    const { AdMob } = await import('@capacitor-community/admob');
-                    interstitialReadyRef.current = false;
-                    await AdMob.showInterstitial();
-                    AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false })
-                      .then(() => { interstitialReadyRef.current = true; })
-                      .catch(() => {});
-                  } catch {}
-                }
-                resetGame();
-              }}
-              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
-              Play Again
-            </button>
+            <div className="space-y-3 w-full">
+              <button
+                onClick={async () => {
+                  gamesPlayedRef.current += 1;
+                  if (gamesPlayedRef.current % 3 === 0 && interstitialReadyRef.current) {
+                    try {
+                      const { AdMob } = await import('@capacitor-community/admob');
+                      interstitialReadyRef.current = false;
+                      await AdMob.showInterstitial();
+                      AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false })
+                        .then(() => { interstitialReadyRef.current = true; })
+                        .catch(() => {});
+                    } catch {}
+                  }
+                  setMyRPDelta(null);
+                  setGamePhase('playing');
+                  restartGame();
+                }}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
+                Rematch
+              </button>
+              <button onClick={resetGame}
+                className="w-full bg-slate-700 text-white font-bold py-3 rounded-xl transition-all">
+                Home
+              </button>
+            </div>
           )}
           {/* Space reserved for native banner ad */}
           <div className="h-[50px] mt-4" />
