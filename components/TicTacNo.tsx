@@ -1,7 +1,22 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Crown, ArrowLeft, Send } from 'lucide-react';
+import { RotateCcw, Crown, ArrowLeft, Send, Settings } from 'lucide-react';
+import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+
+let _hapticsEnabled = true;
+const haptic = {
+  light:   () => { if (_hapticsEnabled) Haptics.impact({ style: ImpactStyle.Light }).catch(() => {}); },
+  medium:  () => { if (_hapticsEnabled) Haptics.impact({ style: ImpactStyle.Medium }).catch(() => {}); },
+  heavy:   () => { if (_hapticsEnabled) Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {}); },
+  success: () => { if (_hapticsEnabled) Haptics.notification({ type: NotificationType.Success }).catch(() => {}); },
+  error:   () => { if (_hapticsEnabled) Haptics.notification({ type: NotificationType.Error }).catch(() => {}); },
+  win:     () => {
+    if (!_hapticsEnabled) return;
+    Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
+    setTimeout(() => Haptics.notification({ type: NotificationType.Success }).catch(() => {}), 200);
+  },
+};
 
 const API = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
@@ -25,6 +40,8 @@ type PlayerStats = {
 type LeaderboardData = { [uuid: string]: PlayerStats };
 type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
 type MpPlayer = { uuid: string; gamertag: string; avatarUrl: string; slot: number; color: string };
+type GameSettings = { haptics: boolean; badgeAnimations: boolean };
+type BadgeProgressItem = { badgeId: string; fromProgress: number; toProgress: number; detail: string };
 type RemoteLastMove = { slot: number; action: string; type: 'placement' | 'battle'; battleNarrative?: string; challenger?: string; challengerOwner?: number; defenderObject?: string; defenderOwner?: number; battleWinner?: string };
 type RemoteGameState = { code: string; phase: 'waiting' | 'playing' | 'gameOver'; players: MpPlayer[]; board: Cell[]; currentSlot: number; winner: number | null; lastMove: RemoteLastMove | null; hostUUID: string; updatedAt: number };
 
@@ -136,6 +153,9 @@ function generateUUID() {
   catch { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 }
 
+// Fill in the numeric App Store ID (found in App Store Connect → App Information)
+const APP_STORE_ID = '6766390198';
+
 const AI_RP = { easy: 50, medium: 200, hard: 450 } as const;
 
 function calcRPChange(won: boolean, myRP: number, opponentRPs: number[]): number {
@@ -244,25 +264,35 @@ function getBadgeInfo(id: string, stats: PlayerStats | undefined, localBadges: S
   }
 }
 
-function BadgeRing({ emoji, imgSrc, color, progress, earned, size, strokeWidth }: {
+function BadgeRing({ emoji, imgSrc, color, progress, earned, size, strokeWidth, animateFrom, showFull }: {
   emoji: string; imgSrc?: string; color: string; progress: number; earned: boolean; size: number; strokeWidth: number;
+  animateFrom?: number; showFull?: boolean;
 }) {
+  const [displayProgress, setDisplayProgress] = useState(animateFrom ?? progress);
+  useEffect(() => {
+    if (animateFrom === undefined) return;
+    const t = setTimeout(() => setDisplayProgress(progress), 60);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const r = (size / 2) - strokeWidth;
   const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - Math.max(0, Math.min(1, progress)));
+  const offset = circ * (1 - Math.max(0, Math.min(1, displayProgress)));
   const cx = size / 2;
+  const lit = earned || showFull;
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox={`0 0 ${size} ${size}`}>
         <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={strokeWidth} />
         <circle cx={cx} cy={cx} r={r} fill="none"
-          stroke={earned ? color : 'rgba(255,255,255,0.18)'}
+          stroke={lit ? color : 'rgba(255,255,255,0.18)'}
           strokeWidth={strokeWidth} strokeLinecap="round"
           strokeDasharray={circ} strokeDashoffset={offset}
-          style={{ transition: 'stroke-dashoffset 1.2s ease' }}
+          style={{ transition: 'stroke-dashoffset 1.4s cubic-bezier(0.4,0,0.2,1)' }}
         />
       </svg>
-      <div className={`absolute inset-0 flex items-center justify-center ${earned ? '' : 'grayscale opacity-30'}`}>
+      <div className={`absolute inset-0 flex items-center justify-center ${lit ? '' : 'grayscale opacity-30'}`}>
         {imgSrc
           ? <img src={imgSrc} alt={emoji} style={{ width: size - strokeWidth * 3, height: size - strokeWidth * 3, objectFit: 'contain' }} />
           : <span style={{ fontSize: size * 0.38 }}>{emoji}</span>}
@@ -342,11 +372,16 @@ export default function TicTacNo() {
       return { party_crasher_count: stored.party_crasher_count ?? 0, word_nerd_count: stored.word_nerd_count ?? 0 };
     } catch { return { party_crasher_count: 0, word_nerd_count: 0 }; }
   });
+  const finalWordRef = useRef<string>('');
   const pendingImages = useRef<Set<string>>(new Set());
   const validationCache = useRef<Map<string, boolean>>(new Map());
   const inputRef = useRef<HTMLInputElement>(null);
   const gamesPlayedRef = useRef(0);
   const interstitialReadyRef = useRef(false);
+  // Live refs so setTimeout callbacks always read current state, not stale closures
+  const leaderboardRef = useRef<LeaderboardData>({});
+  const localBadgesRef = useRef<Set<string>>(new Set());
+  const localCountsRef = useRef<{ party_crasher_count: number; word_nerd_count: number }>({ party_crasher_count: 0, word_nerd_count: 0 });
 
   // Multiplayer state
   const [gameMode, setGameMode] = useState<'local' | 'multiplayer'>('local');
@@ -372,6 +407,7 @@ export default function TicTacNo() {
   const [codeCopied, setCodeCopied] = useState(false);
   const [showBattleLog, setShowBattleLog] = useState(false);
   const [isRanked, setIsRanked] = useState(true);
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
 
   useEffect(() => {
     if (selectedCell !== null && !players[currentPlayer].isAI) {
@@ -435,6 +471,15 @@ export default function TicTacNo() {
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
+  const [badgePopupQueue, setBadgePopupQueue] = useState<string[]>([]);
+  const [badgeProgressQueue, setBadgeProgressQueue] = useState<BadgeProgressItem[]>([]);
+  const [settings, setSettings] = useState<GameSettings>(() => {
+    try { return { haptics: true, badgeAnimations: true, ...JSON.parse(localStorage.getItem('tat_settings') ?? '{}') }; }
+    catch { return { haptics: true, badgeAnimations: true }; }
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const statsSnapshotRef = useRef<PlayerStats | null>(null);
+  const countsSnapshotRef = useRef<{ party_crasher_count: number; word_nerd_count: number } | null>(null);
   const [psGamertag, setPsGamertag] = useState('');
   const [psAvatarWord, setPsAvatarWord] = useState('');
   const [psAvatarUrl, setPsAvatarUrl] = useState('');
@@ -544,10 +589,34 @@ export default function TicTacNo() {
 
       if (state.phase === 'gameOver') {
         setWinner(state.winner);
-        setShowBoardResult(true);
-        setGamePhase('gameOver');
         setIsGenerating(false);
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+
+        // If the final move was a battle, show the narrative overlay first
+        // before transitioning to the board result screen.
+        if (state.lastMove?.type === 'battle' && state.updatedAt !== lastShownBattleAt.current) {
+          lastShownBattleAt.current = state.updatedAt;
+          const lm = state.lastMove;
+          setBattleAnimation({
+            challenger: lm.challenger ?? '',
+            challengerOwner: lm.challengerOwner ?? 0,
+            defenderObject: lm.defenderObject ?? '',
+            defenderOwner: lm.defenderOwner ?? 0,
+            winner: lm.battleWinner ?? '',
+          });
+          setBattleNarrative(lm.battleNarrative ?? '');
+          pendingContinuationRef.current = () => {
+            setBattleAnimation(null);
+            setBattleNarrative('');
+            setShowBoardResult(true);
+            setGamePhase('gameOver');
+          };
+          // Stay in playing phase so the battle overlay renders;
+          // the continuation above will advance to gameOver when the user taps.
+        } else {
+          setShowBoardResult(true);
+          setGamePhase('gameOver');
+        }
         return;
       }
 
@@ -639,10 +708,11 @@ export default function TicTacNo() {
 
   useEffect(() => {
     if (gamePhase !== 'gameOver' || winner === null) return;
-    if (gameMode === 'local' && !isRanked) return;
 
     const signedInPlayers = players.filter(p => !p.isAI && p.profileUUID);
     if (signedInPlayers.length === 0) return;
+
+    const ranked = gameMode === 'multiplayer' || isRanked;
 
     const posts = signedInPlayers.map(async p => {
       const playerIdx = players.indexOf(p);
@@ -659,10 +729,10 @@ export default function TicTacNo() {
       const res = await fetch(`${API}/api/leaderboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, opponentIds }),
+        body: JSON.stringify({ action: 'update', uuid: p.profileUUID, gamertag: p.name, avatarUrl: p.profileAvatarUrl ?? '', won, ranked, opponentIds }),
       });
       const data = await res.json();
-      if (res.ok && p.profileUUID === profile?.uuid) setMyRPDelta(data.rpChange);
+      if (res.ok && p.profileUUID === profile?.uuid) setMyRPDelta(ranked ? data.rpChange : null);
     });
 
     Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
@@ -742,9 +812,14 @@ export default function TicTacNo() {
       try {
         const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
         const updated = { ...stored };
-        newBadges.forEach(b => { if (!updated[b]) updated[b] = true; });
+        const trulyNew: string[] = [];
+        newBadges.forEach(b => { if (!updated[b]) { updated[b] = true; trulyNew.push(b); } });
         localStorage.setItem('tat_badges', JSON.stringify(updated));
         setLocalBadges(new Set(Object.keys(updated).filter(k => updated[k])));
+        if (trulyNew.length > 0) {
+          haptic.success();
+          setBadgePopupQueue(q => [...q, ...trulyNew]);
+        }
       } catch {}
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -759,9 +834,87 @@ export default function TicTacNo() {
         stored.high_roller = true;
         localStorage.setItem('tat_badges', JSON.stringify(stored));
         setLocalBadges(prev => new Set([...prev, 'high_roller']));
+        setBadgePopupQueue(q => [...q, 'high_roller']);
+        haptic.success();
       }
     } catch {}
   }, [myRPDelta]);
+
+  // ── Settings persistence & haptics flag ───────────────────────────────────
+  useEffect(() => {
+    _hapticsEnabled = settings.haptics;
+    try { localStorage.setItem('tat_settings', JSON.stringify(settings)); } catch {}
+  }, [settings]);
+
+  // Keep live refs current so setTimeout callbacks never read stale state
+  useEffect(() => { leaderboardRef.current = leaderboard; }, [leaderboard]);
+  useEffect(() => { localBadgesRef.current = localBadges; }, [localBadges]);
+  useEffect(() => { localCountsRef.current = localCounts; }, [localCounts]);
+
+  // ── Stats snapshot at game start ──────────────────────────────────────────
+  useEffect(() => {
+    if (gamePhase !== 'playing') return;
+    statsSnapshotRef.current = profile ? (leaderboard[profile.uuid] ?? null) : null;
+    countsSnapshotRef.current = { ...localCounts };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase]);
+
+  // ── Badge progress queue after game over ──────────────────────────────────
+  const PROGRESS_BADGE_IDS = ['veteran', 'first_blood', 'century_club', 'big_easy', 'medium_rare', 'hard_attack', 'hat_trick', 'on_fire', 'unstoppable', 'silver_tongue', 'gold_digger', 'diamond', 'party_crasher', 'word_nerd'];
+  useEffect(() => {
+    if (gamePhase !== 'gameOver' || !settings.badgeAnimations) return;
+    const timer = setTimeout(() => {
+      // Use refs so we read the values current at callback time, not stale closure values
+      const fromStats = statsSnapshotRef.current;
+      const fromCounts = countsSnapshotRef.current ?? { party_crasher_count: 0, word_nerd_count: 0 };
+      const toStats = profile ? leaderboardRef.current[profile.uuid] : undefined;
+      if (!toStats) return;
+      const currentBadges = localBadgesRef.current;
+      const currentCounts = localCountsRef.current;
+      const newlyEarned: string[] = [];
+      const items: BadgeProgressItem[] = [];
+      for (const badgeId of PROGRESS_BADGE_IDS) {
+        if (currentBadges.has(badgeId)) continue;
+        const fromInfo = getBadgeInfo(badgeId, fromStats ?? undefined, new Set(), fromCounts);
+        const toInfo   = getBadgeInfo(badgeId, toStats, new Set(), currentCounts);
+        if (toInfo.progress <= fromInfo.progress) continue;
+        if (toInfo.progress >= 1) {
+          // Badge just earned this game — save it and show as "Badge Unlocked!"
+          newlyEarned.push(badgeId);
+          try {
+            const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
+            if (!stored[badgeId]) {
+              stored[badgeId] = true;
+              localStorage.setItem('tat_badges', JSON.stringify(stored));
+              setLocalBadges(new Set(Object.keys(stored).filter(k => stored[k])));
+            }
+          } catch {}
+        } else {
+          const detailInfo = getBadgeInfo(badgeId, toStats, currentBadges, currentCounts);
+          items.push({ badgeId, fromProgress: fromInfo.progress, toProgress: toInfo.progress, detail: detailInfo.detail });
+        }
+      }
+      if (newlyEarned.length > 0) {
+        haptic.success();
+        setBadgePopupQueue(q => [...q, ...newlyEarned]);
+      }
+      if (items.length > 0) setBadgeProgressQueue(items);
+    }, 2500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase]);
+
+  // ── Review prompt ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (gamePhase !== 'gameOver') return;
+    try {
+      const total = (parseInt(localStorage.getItem('tat_total_games') ?? '0') || 0) + 1;
+      localStorage.setItem('tat_total_games', String(total));
+      const nextPrompt = parseInt(localStorage.getItem('tat_review_next') ?? '5') || 5;
+      if (total >= nextPrompt) { haptic.light(); setShowReviewPrompt(true); }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase]);
 
   const CACHE_KEY = 'ttn_image_cache';
   const [imageCache, setImageCache] = useState<Record<string, string>>(() => {
@@ -807,7 +960,11 @@ export default function TicTacNo() {
   }, [imageCache]);
   useEffect(() => { fetchImageRef.current = fetchImage; }, [fetchImage]);
 
-  const dismissBattleOverlay = useCallback(() => {
+  const dismissBattleOverlay = useCallback((anim: BattleAnimation | null) => {
+    // Don't dismiss before the battle result is known — guards against
+    // iOS WebView's 300ms delayed synthetic click firing on the overlay
+    // immediately after the user taps the word-submit button.
+    if (!anim?.winner) return;
     if (pendingContinuationRef.current) {
       pendingContinuationRef.current();
       pendingContinuationRef.current = null;
@@ -899,6 +1056,10 @@ export default function TicTacNo() {
 
         const gameWinner = checkWinner(newBoard);
         if (gameWinner !== null) {
+          finalWordRef.current = object;
+          const profIdxP = players.findIndex(p => p.profileUUID && !p.isAI);
+          if (profIdxP >= 0 && gameWinner === profIdxP) haptic.win();
+          else if (profIdxP >= 0) haptic.error();
           setWinner(gameWinner);
           setShowBoardResult(true);
           setGamePhase('gameOver');
@@ -916,6 +1077,7 @@ export default function TicTacNo() {
       } else {
         const existing = currentBoard[index]!;
 
+        haptic.heavy();
         setBattleAnimation({
           challenger: object,
           challengerOwner: playerMakingMove,
@@ -937,8 +1099,18 @@ export default function TicTacNo() {
           setBoard(newBoard);
           setBattleAnimation(prev => prev ? { ...prev, winner: winnerWord } : null);
 
-          // Track battle outcomes for the signed-in profile player
+          // Haptic feedback for battle result (human player only)
           const profilePlayerIdxB = players.findIndex(p => p.profileUUID && !p.isAI);
+          if (profilePlayerIdxB >= 0) {
+            const humanInvolved = playerMakingMove === profilePlayerIdxB || existing.owner === profilePlayerIdxB;
+            if (humanInvolved) {
+              const humanWon = (playerMakingMove === profilePlayerIdxB && challengerWon) ||
+                               (existing.owner === profilePlayerIdxB && !challengerWon);
+              if (humanWon) haptic.success(); else haptic.error();
+            }
+          }
+
+          // Track battle outcomes for the signed-in profile player
           if (profilePlayerIdxB >= 0) {
             const profileLost =
               (playerMakingMove === profilePlayerIdxB && !challengerWon) ||
@@ -967,11 +1139,14 @@ export default function TicTacNo() {
 
             const gameWinner = checkWinner(newBoard);
             if (gameWinner !== null) {
+              finalWordRef.current = winnerWord;
               // Terminator: profile player won via a battle
               const profIdx = players.findIndex(p => p.profileUUID && !p.isAI);
               if (profIdx >= 0 && gameWinner === profIdx && playerMakingMove === profIdx && challengerWon) {
                 winningMoveWasBattleRef.current = true;
               }
+              if (profIdx >= 0 && gameWinner === profIdx) haptic.win();
+              else if (profIdx >= 0) haptic.error();
               setWinner(gameWinner);
               setShowBoardResult(true);
               setGamePhase('gameOver');
@@ -1107,12 +1282,16 @@ export default function TicTacNo() {
     setLastMove(null);
     setMyRPDelta(null);
     setShowBoardResult(false);
+    setShowReviewPrompt(false);
     humanBattleLossRef.current = false;
     humanMoveCountRef.current = 0;
     humanAttackCountRef.current = 0;
     battleWonSquaresRef.current = new Set();
     winningMoveWasBattleRef.current = false;
     humanBlockedWinRef.current = false;
+    finalWordRef.current = '';
+    setBadgePopupQueue([]);
+    setBadgeProgressQueue([]);
     setSetupStep('mode');
     pendingContinuationRef.current = null;
     usedWordsRef.current = new Set();
@@ -1138,6 +1317,12 @@ export default function TicTacNo() {
     battleWonSquaresRef.current = new Set();
     winningMoveWasBattleRef.current = false;
     humanBlockedWinRef.current = false;
+    finalWordRef.current = '';
+    setBadgePopupQueue([]);
+    setBadgeProgressQueue([]);
+    // Refresh snapshot so rematch diffs from this game's start, not the previous game's
+    statsSnapshotRef.current = profile ? (leaderboardRef.current[profile.uuid] ?? null) : null;
+    countsSnapshotRef.current = { ...localCountsRef.current };
     if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
   };
 
@@ -1175,6 +1360,11 @@ export default function TicTacNo() {
     if (!word || isGenerating || selectedCell === null) return;
     setIsGenerating(true);
     const wordKey = word.toLowerCase().trim();
+    if (usedWordsRef.current.has(wordKey)) {
+      setWordError("That word has already been used in this game — try another.");
+      setIsGenerating(false);
+      return;
+    }
     const cachedResult = validationCache.current.get(wordKey);
     if (cachedResult === false) {
       setWordError("That word isn't allowed — please try something else.");
@@ -1212,10 +1402,13 @@ export default function TicTacNo() {
           badges.word_nerd = true;
           localStorage.setItem('tat_badges', JSON.stringify(badges));
           setLocalBadges(prev => new Set([...prev, 'word_nerd']));
+          setBadgePopupQueue(q => [...q, 'word_nerd']);
+          haptic.success();
         }
       } catch {}
     }
 
+    haptic.medium();
     if (gameModeRef.current === 'multiplayer') {
       await submitMpMove(selectedCell, word);
       setSelectedCell(null);
@@ -1312,6 +1505,78 @@ export default function TicTacNo() {
       }
     } catch {}
   }, [profile]);
+
+  const writeImageToCache = useCallback(async (publicPath: string, filename: string): Promise<string | null> => {
+    try {
+      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      const resp = await fetch(publicPath);
+      if (!resp.ok) return null;
+      const buf = await resp.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const b64 = btoa(binary);
+      const result = await Filesystem.writeFile({
+        path: filename,
+        data: b64,
+        directory: Directory.Cache,
+      });
+      return result.uri;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const shareWin = useCallback(async () => {
+    const aiOpponent = players.find(p => p.isAI);
+    const humanOpponent = players.find(p => !p.isAI && p.profileUUID !== profile?.uuid);
+
+    let opponentTag: string;
+    if (aiOpponent) {
+      const diffLabel = { easy: 'Easy AI', medium: 'Medium AI', hard: 'Hard AI' }[aiOpponent.difficulty];
+      opponentTag = `#${diffLabel.replace(' ', '')}`;
+    } else if (humanOpponent?.name) {
+      opponentTag = `#${humanOpponent.name.replace(/\s+/g, '')}`;
+    } else {
+      opponentTag = 'a friend';
+    }
+
+    const finalWord = finalWordRef.current;
+    const wordPart = finalWord ? ` with a #${finalWord.replace(/\s+/g, '')}` : '';
+    const rpText = myRPDelta !== null && myRPDelta > 0 ? ` +${myRPDelta} RP` : '';
+    const appUrl = `https://apps.apple.com/us/app/tic-attack-toe/id${APP_STORE_ID}`;
+    const text = `I just beat ${opponentTag} in Tic Attack Toe${wordPart}!${rpText}\n\nCome join the fun!\n${appUrl}`;
+
+    try {
+      const { Share } = await import('@capacitor/share');
+      const imgUri = await writeImageToCache('/logo.png', 'tat_logo.png');
+      await Share.share({
+        title: 'I won in Tic Attack Toe!',
+        text,
+        dialogTitle: 'Share your victory',
+        ...(imgUri ? { files: [imgUri] } : {}),
+      });
+      haptic.light();
+    } catch {}
+  }, [players, myRPDelta, profile, writeImageToCache]);
+
+  const shareBadge = useCallback(async (badgeId: string) => {
+    const badge = BADGES.find(b => b.id === badgeId);
+    if (!badge) return;
+    const text = `I just achieved "${badge.name}" in Tic Attack Toe! ${badge.emoji}\n\n${badge.desc}`;
+    try {
+      const { Share } = await import('@capacitor/share');
+      const imgUri = await writeImageToCache(`/badges/${badge.id}.png`, `badge_${badge.id}.png`);
+      await Share.share({
+        title: `I earned ${badge.name}!`,
+        text,
+        url: imgUri ? undefined : `https://apps.apple.com/us/app/tic-attack-toe/id${APP_STORE_ID}`,
+        dialogTitle: 'Share your badge',
+        ...(imgUri ? { files: [imgUri] } : {}),
+      });
+      haptic.light();
+    } catch {}
+  }, [writeImageToCache]);
 
   const leaveRoom = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -1739,11 +2004,11 @@ export default function TicTacNo() {
                 <p className="text-white/40 text-xs mt-0.5">Win Rate</p>
               </div>
               <div className="bg-white/5 rounded-xl p-3 text-center">
-                <p className="text-white font-black text-xl">{currentStreak} 🔥</p>
+                <p className="text-white font-black text-xl">{currentStreak}</p>
                 <p className="text-white/40 text-xs mt-0.5">Win Streak</p>
               </div>
               <div className="bg-white/5 rounded-xl p-3 text-center">
-                <p className="text-white font-black text-xl">{dayStreak} 📅</p>
+                <p className="text-white font-black text-xl">{dayStreak}</p>
                 <p className="text-white/40 text-xs mt-0.5">Day Streak</p>
               </div>
             </div>
@@ -1781,6 +2046,63 @@ export default function TicTacNo() {
                 })}
               </div>
             </div>
+
+            {/* Badge earned popup */}
+            {badgePopupQueue.length > 0 && (() => {
+              const badge = BADGES.find(b => b.id === badgePopupQueue[0]);
+              if (!badge) return null;
+              const imgSrc = `/badges/${badge.id}.png`;
+              const dismiss = () => setBadgePopupQueue(q => q.slice(1));
+              return (
+                <div className="fixed inset-0 z-70 flex items-center justify-center p-6"
+                  style={{ background: 'rgba(0,0,0,0.88)' }}>
+                  <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
+                    <p className="text-yellow-400 font-black text-xs uppercase tracking-widest">Badge Unlocked!</p>
+                    <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                      progress={1} earned={true} size={140} strokeWidth={8} />
+                    <p className="text-white font-black text-xl text-center">{badge.name}</p>
+                    <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
+                    <button
+                      onClick={() => { shareBadge(badge.id); }}
+                      className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+                      <span>Share</span><span>📤</span>
+                    </button>
+                    <button onClick={dismiss}
+                      className="w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
+                      Got it
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Badge progress popup — shown after earned popups drain */}
+            {badgePopupQueue.length === 0 && badgeProgressQueue.length > 0 && settings.badgeAnimations && (() => {
+              const item = badgeProgressQueue[0];
+              const badge = BADGES.find(b => b.id === item.badgeId);
+              if (!badge) return null;
+              const imgSrc = `/badges/${badge.id}.png`;
+              const remaining = badgeProgressQueue.length - 1;
+              const dismiss = () => setBadgeProgressQueue(q => q.slice(1));
+              return (
+                <div className="fixed inset-0 z-70 flex items-center justify-center p-6"
+                  style={{ background: 'rgba(0,0,0,0.88)' }}>
+                  <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
+                    <p className="text-purple-400 font-black text-xs uppercase tracking-widest">Badge Progress</p>
+                    <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                      progress={item.toProgress} earned={false} size={140} strokeWidth={8}
+                      animateFrom={item.fromProgress} showFull={true} />
+                    <p className="text-white font-black text-xl text-center">{badge.name}</p>
+                    <p className="text-white/50 text-sm text-center font-bold">{item.detail}</p>
+                    <p className="text-white/40 text-xs text-center leading-relaxed">{badge.desc}</p>
+                    <button onClick={dismiss}
+                      className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
+                      {remaining > 0 ? `Next (${remaining} more)` : 'Done'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Badge detail modal */}
             {selectedBadge && (() => {
@@ -1824,6 +2146,67 @@ export default function TicTacNo() {
         );
       })()}
 
+      {/* Settings modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-80 flex items-end justify-center"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={() => setShowSettings(false)}>
+          <div className="bg-slate-900 rounded-t-3xl border-t border-white/10 p-6 w-full max-w-lg shadow-2xl pb-10"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <p className="text-white font-black text-lg">Settings</p>
+              <button onClick={() => setShowSettings(false)} className="text-white/40 text-sm font-bold">Done</button>
+            </div>
+
+            {/* Haptics & Visuals */}
+            <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">Feedback</p>
+            <div className="bg-slate-800/60 rounded-2xl overflow-hidden divide-y divide-white/5 mb-5">
+              <div className="flex items-center justify-between px-4 py-3.5">
+                <div>
+                  <p className="text-white font-bold text-sm">Haptics</p>
+                  <p className="text-white/40 text-xs">Vibration on taps, battles, and wins</p>
+                </div>
+                <button
+                  onClick={() => setSettings(s => ({ ...s, haptics: !s.haptics }))}
+                  className={`w-12 h-7 rounded-full transition-colors relative ${settings.haptics ? 'bg-purple-500' : 'bg-white/20'}`}>
+                  <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${settings.haptics ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3.5">
+                <div>
+                  <p className="text-white font-bold text-sm">Badge Animations</p>
+                  <p className="text-white/40 text-xs">Progress rings after each game</p>
+                </div>
+                <button
+                  onClick={() => setSettings(s => ({ ...s, badgeAnimations: !s.badgeAnimations }))}
+                  className={`w-12 h-7 rounded-full transition-colors relative ${settings.badgeAnimations ? 'bg-purple-500' : 'bg-white/20'}`}>
+                  <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${settings.badgeAnimations ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Coming soon */}
+            <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">Sound</p>
+            <div className="bg-slate-800/60 rounded-2xl overflow-hidden divide-y divide-white/5">
+              <div className="flex items-center justify-between px-4 py-3.5 opacity-40">
+                <div>
+                  <p className="text-white font-bold text-sm">Music</p>
+                  <p className="text-white/40 text-xs">Background music during games</p>
+                </div>
+                <p className="text-white/40 text-xs font-bold">Coming soon</p>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3.5 opacity-40">
+                <div>
+                  <p className="text-white font-bold text-sm">Sound Effects</p>
+                  <p className="text-white/40 text-xs">Battle sounds, wins, and placements</p>
+                </div>
+                <p className="text-white/40 text-xs font-bold">Coming soon</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="h-[100dvh] bg-cover bg-center bg-no-repeat flex flex-col justify-end px-4"
         style={{ backgroundImage: 'url(/bg.png)', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))', paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div className="max-w-2xl mx-auto w-full">
@@ -1849,14 +2232,18 @@ export default function TicTacNo() {
                   ) : (
                     <p className="text-white/40 text-sm">No profile</p>
                   )}
-                  <div className="flex gap-3">
+                  <div className="flex items-center gap-3">
                     <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-xl">🏆</button>
                     <button onClick={() => {
                       setPsGamertag(profile?.gamertag ?? '');
                       setPsAvatarWord(profile?.avatarWord ?? '');
                       setPsAvatarUrl(profile?.avatarUrl ?? '');
                       setShowProfileSetup(true);
-                    }} className="text-xl">⚙️</button>
+                    }} className="text-xl">👤</button>
+                    <button onClick={() => setShowSettings(true)}
+                      className="text-white/60 hover:text-white transition-colors">
+                      <Settings size={20} />
+                    </button>
                   </div>
                 </div>
                 {/* Ranked / Casual toggle */}
@@ -2170,7 +2557,7 @@ export default function TicTacNo() {
           );
           return (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 cursor-pointer"
-              onClick={dismissBattleOverlay}>
+              onClick={() => dismissBattleOverlay(battleAnimation)}>
               <div className="bg-gradient-to-br from-slate-800 via-slate-700 to-slate-800 rounded-2xl shadow-2xl p-8 border border-yellow-500/50 max-w-lg w-full">
                 <div className="text-center">
                   <div className="flex justify-around items-center mb-5">
@@ -2190,7 +2577,9 @@ export default function TicTacNo() {
                       <p className="text-gray-400 text-sm animate-pulse">Chronicling the battle...</p>
                     )}
                   </div>
-                  <p className="text-gray-500 text-xs mt-4 animate-pulse">Tap anywhere to continue</p>
+                  <p className={`text-xs mt-4 animate-pulse ${battleAnimation?.winner ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {battleAnimation?.winner ? 'Tap anywhere to continue' : 'Battle in progress...'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -2222,16 +2611,15 @@ export default function TicTacNo() {
         )}
 
         {/* Header */}
-        <div className="shrink-0 px-4 flex items-center justify-between" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
-          <button onClick={isMultiplayer ? forfeitGame : resetGame} disabled={isGenerating}
-            className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
-            <ArrowLeft size={18} />
-          </button>
+        <div className="shrink-0 px-4 flex items-center" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
+          <div className="flex-1 flex items-center justify-start">
+            <button onClick={isMultiplayer ? forfeitGame : resetGame} disabled={isGenerating}
+              className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+              <ArrowLeft size={18} />
+            </button>
+          </div>
           <img src="/logo.png" alt="Tic Attack Toe" className="h-36" />
-          <div className="flex gap-2 items-center">
-            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isMultiplayer || isRanked ? 'bg-purple-700/80 text-white' : 'bg-slate-700 text-white/40'}`}>
-              {isMultiplayer || isRanked ? 'Ranked' : 'Casual'}
-            </span>
+          <div className="flex-1 flex items-center justify-end gap-2">
             {battleLog.length > 0 && (
               <button onClick={() => setShowBattleLog(v => !v)}
                 className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1.5 rounded-lg text-xs font-bold">
@@ -2271,7 +2659,7 @@ export default function TicTacNo() {
                 const isClickable = isHumanTurn && !isGenerating;
                 return (
                   <div key={idx}
-                    onClick={() => { if (isClickable) { setSelectedCell(idx); setWordError(''); } }}
+                    onClick={() => { if (isClickable) { haptic.light(); setSelectedCell(idx); setWordError(''); } }}
                     className={`rounded-xl overflow-hidden transition-all cursor-pointer border-2
                       ${isSelected ? 'ring-4 ring-white ring-offset-1 ring-offset-transparent scale-105' : ''}
                       ${isClickable && !cell ? 'active:scale-95' : ''}
@@ -2446,6 +2834,38 @@ export default function TicTacNo() {
     const winnerPlayer = players[winner];
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6 flex items-center justify-center">
+        {showReviewPrompt && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+            <div className="bg-slate-900 border border-purple-500/40 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
+              <div className="text-5xl mb-3">⭐</div>
+              <h2 className="text-white font-black text-xl mb-2">Enjoying Tic Attack Toe?</h2>
+              <p className="text-white/60 text-sm mb-6">A quick rating helps others find the game and keeps new updates coming.</p>
+              <button
+                onClick={() => {
+                  setShowReviewPrompt(false);
+                  try { localStorage.setItem('tat_review_next', String(Infinity)); } catch {}
+                  const url = APP_STORE_ID
+                    ? `itms-apps://itunes.apple.com/app/id${APP_STORE_ID}?action=write-review`
+                    : `itms-apps://itunes.apple.com/us/app/tic-attack-toe/`;
+                  window.open(url, '_system');
+                }}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-xl mb-3">
+                Rate Now ⭐⭐⭐⭐⭐
+              </button>
+              <button
+                onClick={() => {
+                  setShowReviewPrompt(false);
+                  try {
+                    const total = parseInt(localStorage.getItem('tat_total_games') ?? '0') || 0;
+                    localStorage.setItem('tat_review_next', String(total + 10));
+                  } catch {}
+                }}
+                className="w-full bg-white/10 text-white/60 font-semibold py-3 rounded-xl text-sm">
+                Not Now
+              </button>
+            </div>
+          </div>
+        )}
         <div className="text-center max-w-md">
           <div className="text-6xl mb-4 animate-bounce">🏆</div>
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4">
@@ -2484,6 +2904,13 @@ export default function TicTacNo() {
               </div>
             );
           })()}
+          {!winnerPlayer.isAI && (
+            <button
+              onClick={shareWin}
+              className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 rounded-xl mb-3 flex items-center justify-center gap-2 hover:shadow-2xl transition-all">
+              <span>Share Victory</span>
+            </button>
+          )}
           {gameMode === 'multiplayer' ? (
             <div className="space-y-3 w-full">
               {mpIsHost ? (

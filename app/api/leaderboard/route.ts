@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     | { action: 'fetch' }
     | { action: 'register'; uuid: string; gamertag: string; avatarUrl: string; pin: string }
     | { action: 'signin';   gamertag: string; pin: string }
-    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; opponentIds: ({ uuid: string } | { ai: 'easy' | 'medium' | 'hard' })[] };
+    | { action: 'update';   uuid: string; gamertag: string; avatarUrl: string; won: boolean; ranked?: boolean; opponentIds: ({ uuid: string } | { ai: 'easy' | 'medium' | 'hard' })[] };
 
   // ── fetch ──────────────────────────────────────────────────────────────────
   if (body.action === 'fetch') {
@@ -132,7 +132,7 @@ export async function POST(req: Request) {
 
   // ── update (stats) ─────────────────────────────────────────────────────────
   if (body.action === 'update') {
-    const { uuid, gamertag, avatarUrl, won, opponentIds } = body;
+    const { uuid, gamertag, avatarUrl, won, ranked = true, opponentIds } = body;
     if (!uuid || !gamertag || typeof won !== 'boolean' || !Array.isArray(opponentIds)) {
       return Response.json({ error: 'invalid' }, { status: 400 });
     }
@@ -147,8 +147,9 @@ export async function POST(req: Request) {
       const pd = await redis!.hgetall(playerKey(opp.uuid));
       return parseInt(String((pd as Record<string, unknown>)?.rp ?? '0')) || 0;
     }));
-    const rpChange = calcRPChange(won, currentRP, opponentRPs);
-    const newRP = Math.max(0, currentRP + rpChange);
+    // Only apply RP change for ranked games
+    const rpChange = ranked ? calcRPChange(won, currentRP, opponentRPs) : 0;
+    const newRP = ranked ? Math.max(0, currentRP + rpChange) : currentRP;
 
     // Win streak
     const currentStreak = parseInt(String(d.currentStreak ?? '0')) || 0;
