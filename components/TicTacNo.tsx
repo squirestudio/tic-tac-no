@@ -155,6 +155,7 @@ function generateUUID() {
 
 // Fill in the numeric App Store ID (found in App Store Connect → App Information)
 const APP_STORE_ID = '6766390198';
+const PROGRESS_BADGE_IDS = ['veteran', 'first_blood', 'century_club', 'big_easy', 'medium_rare', 'hard_attack', 'hat_trick', 'on_fire', 'unstoppable', 'silver_tongue', 'gold_digger', 'diamond', 'party_crasher', 'word_nerd'];
 
 const AI_RP = { easy: 50, medium: 200, hard: 450 } as const;
 
@@ -480,6 +481,7 @@ export default function TicTacNo() {
   const [showSettings, setShowSettings] = useState(false);
   const statsSnapshotRef = useRef<PlayerStats | null>(null);
   const countsSnapshotRef = useRef<{ party_crasher_count: number; word_nerd_count: number } | null>(null);
+  const badgeCheckDoneRef = useRef(false);
   const [psGamertag, setPsGamertag] = useState('');
   const [psAvatarWord, setPsAvatarWord] = useState('');
   const [psAvatarUrl, setPsAvatarUrl] = useState('');
@@ -534,6 +536,7 @@ export default function TicTacNo() {
       if (!res.ok) return;
       const data: LeaderboardData = await res.json();
       lbLastFetchRef.current = Date.now();
+      leaderboardRef.current = data;
       setLeaderboard(data);
       try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(data)); } catch {}
     } catch {}
@@ -735,7 +738,7 @@ export default function TicTacNo() {
       if (res.ok && p.profileUUID === profile?.uuid) setMyRPDelta(ranked ? data.rpChange : null);
     });
 
-    Promise.all(posts).then(() => fetchLeaderboard()).catch(() => {});
+    Promise.all(posts).then(() => fetchLeaderboard(true)).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase, winner, gameMode, isRanked]);
 
@@ -856,53 +859,54 @@ export default function TicTacNo() {
     if (gamePhase !== 'playing') return;
     statsSnapshotRef.current = profile ? (leaderboard[profile.uuid] ?? null) : null;
     countsSnapshotRef.current = { ...localCounts };
+    badgeCheckDoneRef.current = false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase]);
 
-  // ── Badge progress queue after game over ──────────────────────────────────
-  const PROGRESS_BADGE_IDS = ['veteran', 'first_blood', 'century_club', 'big_easy', 'medium_rare', 'hard_attack', 'hat_trick', 'on_fire', 'unstoppable', 'silver_tongue', 'gold_digger', 'diamond', 'party_crasher', 'word_nerd'];
+  // ── Badge progress — reactive to leaderboard update after game over ────────
   useEffect(() => {
-    if (gamePhase !== 'gameOver' || !settings.badgeAnimations) return;
-    const timer = setTimeout(() => {
-      // Use refs so we read the values current at callback time, not stale closure values
-      const fromStats = statsSnapshotRef.current;
-      const fromCounts = countsSnapshotRef.current ?? { party_crasher_count: 0, word_nerd_count: 0 };
-      const toStats = profile ? leaderboardRef.current[profile.uuid] : undefined;
-      if (!toStats) return;
-      const currentBadges = localBadgesRef.current;
-      const currentCounts = localCountsRef.current;
-      const newlyEarned: string[] = [];
-      const items: BadgeProgressItem[] = [];
-      for (const badgeId of PROGRESS_BADGE_IDS) {
-        if (currentBadges.has(badgeId)) continue;
-        const fromInfo = getBadgeInfo(badgeId, fromStats ?? undefined, new Set(), fromCounts);
-        const toInfo   = getBadgeInfo(badgeId, toStats, new Set(), currentCounts);
-        if (toInfo.progress <= fromInfo.progress) continue;
-        if (toInfo.progress >= 1) {
-          // Badge just earned this game — save it and show as "Badge Unlocked!"
-          newlyEarned.push(badgeId);
-          try {
-            const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
-            if (!stored[badgeId]) {
-              stored[badgeId] = true;
-              localStorage.setItem('tat_badges', JSON.stringify(stored));
-              setLocalBadges(new Set(Object.keys(stored).filter(k => stored[k])));
-            }
-          } catch {}
-        } else {
-          const detailInfo = getBadgeInfo(badgeId, toStats, currentBadges, currentCounts);
-          items.push({ badgeId, fromProgress: fromInfo.progress, toProgress: toInfo.progress, detail: detailInfo.detail });
-        }
+    if (gamePhase !== 'gameOver' || !profile || !settings.badgeAnimations) return;
+    if (badgeCheckDoneRef.current) return;
+
+    const toStats = leaderboard[profile.uuid];
+    if (!toStats) return;
+
+    // Wait until leaderboard reflects this game (gamesPlayed must have increased)
+    const fromStats = statsSnapshotRef.current;
+    if ((toStats.gamesPlayed ?? 0) <= (fromStats?.gamesPlayed ?? 0)) return;
+
+    badgeCheckDoneRef.current = true;
+
+    const fromCounts = countsSnapshotRef.current ?? { party_crasher_count: 0, word_nerd_count: 0 };
+    const currentBadges = localBadgesRef.current;
+    const currentCounts = localCountsRef.current;
+    const newlyEarned: string[] = [];
+    const items: BadgeProgressItem[] = [];
+
+    for (const badgeId of PROGRESS_BADGE_IDS) {
+      if (currentBadges.has(badgeId)) continue;
+      const fromInfo = getBadgeInfo(badgeId, fromStats ?? undefined, new Set(), fromCounts);
+      const toInfo   = getBadgeInfo(badgeId, toStats, new Set(), currentCounts);
+      if (toInfo.progress <= fromInfo.progress) continue;
+      if (toInfo.progress >= 1) {
+        newlyEarned.push(badgeId);
+        try {
+          const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
+          if (!stored[badgeId]) {
+            stored[badgeId] = true;
+            localStorage.setItem('tat_badges', JSON.stringify(stored));
+            setLocalBadges(new Set(Object.keys(stored).filter(k => stored[k])));
+          }
+        } catch {}
+      } else {
+        const detailInfo = getBadgeInfo(badgeId, toStats, currentBadges, currentCounts);
+        items.push({ badgeId, fromProgress: fromInfo.progress, toProgress: toInfo.progress, detail: detailInfo.detail });
       }
-      if (newlyEarned.length > 0) {
-        haptic.success();
-        setBadgePopupQueue(q => [...q, ...newlyEarned]);
-      }
-      if (items.length > 0) setBadgeProgressQueue(items);
-    }, 2500);
-    return () => clearTimeout(timer);
+    }
+    if (newlyEarned.length > 0) { haptic.success(); setBadgePopupQueue(q => [...q, ...newlyEarned]); }
+    if (items.length > 0) setBadgeProgressQueue(items);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gamePhase]);
+  }, [leaderboard, gamePhase]);
 
   // ── Review prompt ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1323,6 +1327,7 @@ export default function TicTacNo() {
     // Refresh snapshot so rematch diffs from this game's start, not the previous game's
     statsSnapshotRef.current = profile ? (leaderboardRef.current[profile.uuid] ?? null) : null;
     countsSnapshotRef.current = { ...localCountsRef.current };
+    badgeCheckDoneRef.current = false;
     if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
   };
 
@@ -2834,6 +2839,60 @@ export default function TicTacNo() {
     const winnerPlayer = players[winner];
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6 flex items-center justify-center">
+        {/* Badge earned popup */}
+        {badgePopupQueue.length > 0 && (() => {
+          const badge = BADGES.find(b => b.id === badgePopupQueue[0]);
+          if (!badge) return null;
+          const imgSrc = `/badges/${badge.id}.png`;
+          const dismiss = () => setBadgePopupQueue(q => q.slice(1));
+          return (
+            <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
+              style={{ background: 'rgba(0,0,0,0.88)' }}>
+              <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
+                <p className="text-yellow-400 font-black text-xs uppercase tracking-widest">Badge Unlocked!</p>
+                <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                  progress={1} earned={true} size={140} strokeWidth={8} />
+                <p className="text-white font-black text-xl text-center">{badge.name}</p>
+                <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
+                <button onClick={() => { shareBadge(badge.id); }}
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+                  <span>Share</span><span>📤</span>
+                </button>
+                <button onClick={dismiss}
+                  className="w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
+                  Got it
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* Badge progress popup */}
+        {badgePopupQueue.length === 0 && badgeProgressQueue.length > 0 && settings.badgeAnimations && (() => {
+          const item = badgeProgressQueue[0];
+          const badge = BADGES.find(b => b.id === item.badgeId);
+          if (!badge) return null;
+          const imgSrc = `/badges/${badge.id}.png`;
+          const remaining = badgeProgressQueue.length - 1;
+          const dismiss = () => setBadgeProgressQueue(q => q.slice(1));
+          return (
+            <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
+              style={{ background: 'rgba(0,0,0,0.88)' }}>
+              <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
+                <p className="text-purple-400 font-black text-xs uppercase tracking-widest">Badge Progress</p>
+                <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                  progress={item.toProgress} earned={false} size={140} strokeWidth={8}
+                  animateFrom={item.fromProgress} showFull={true} />
+                <p className="text-white font-black text-xl text-center">{badge.name}</p>
+                <p className="text-white/50 text-sm text-center font-bold">{item.detail}</p>
+                <p className="text-white/40 text-xs text-center leading-relaxed">{badge.desc}</p>
+                <button onClick={dismiss}
+                  className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
+                  {remaining > 0 ? `Next (${remaining} more)` : 'Done'}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         {showReviewPrompt && (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
             <div className="bg-slate-900 border border-purple-500/40 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
@@ -2866,6 +2925,17 @@ export default function TicTacNo() {
             </div>
           </div>
         )}
+        {/* DEBUG — remove after confirming badge progress works */}
+        <div className="fixed top-0 left-0 right-0 z-[200] bg-black/90 text-green-400 text-[10px] font-mono p-1 flex flex-wrap gap-x-2">
+          <span>profile:{profile?.uuid?.slice(0,6) ?? 'NULL'}</span>
+          <span>anim:{settings.badgeAnimations ? 'ON' : 'OFF'}</span>
+          <span>popQ:{badgePopupQueue.length}</span>
+          <span>progQ:{badgeProgressQueue.length}</span>
+          <span>fromGP:{statsSnapshotRef.current?.gamesPlayed ?? 'null'}</span>
+          <span>toGP:{profile ? (leaderboard[profile.uuid]?.gamesPlayed ?? 'none') : 'noprofile'}</span>
+          <span>fromEasy:{statsSnapshotRef.current?.winsVsEasy ?? 'null'}</span>
+          <span>toEasy:{profile ? (leaderboard[profile.uuid]?.winsVsEasy ?? 'none') : 'noprofile'}</span>
+        </div>
         <div className="text-center max-w-md">
           <div className="text-6xl mb-4 animate-bounce">🏆</div>
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4">
