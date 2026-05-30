@@ -298,9 +298,6 @@ function BadgeRing({ emoji, imgSrc, color, progress, earned, size, strokeWidth, 
           ? <img src={imgSrc} alt={emoji} style={{ width: size - strokeWidth * 3, height: size - strokeWidth * 3, objectFit: 'contain' }} />
           : <span style={{ fontSize: size * 0.38 }}>{emoji}</span>}
       </div>
-      {earned && size >= 100 && (
-        <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-green-500 border-2 border-slate-900 flex items-center justify-center text-[11px] text-white font-black">✓</div>
-      )}
     </div>
   );
 }
@@ -312,9 +309,6 @@ function BadgeCircle({ emoji, imgSrc, name, color, progress, earned, detail, onC
     <button className="flex flex-col items-center gap-1 w-[72px]" onClick={onClick}>
       <div className="relative">
         <BadgeRing emoji={emoji} imgSrc={imgSrc} color={color} progress={progress} earned={earned} size={72} strokeWidth={5} />
-        {earned && (
-          <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 border border-slate-900 flex items-center justify-center text-[9px] text-white font-black">✓</div>
-        )}
       </div>
       <p className={`text-[10px] font-bold text-center leading-tight ${earned ? 'text-white' : 'text-white/30'}`}>{name}</p>
       <p className={`text-[9px] text-center ${earned ? 'text-white/50' : 'text-white/20'}`}>{detail}</p>
