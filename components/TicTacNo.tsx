@@ -287,7 +287,7 @@ function BadgeRing({ emoji, imgSrc, color, progress, earned, size, strokeWidth, 
       <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox={`0 0 ${size} ${size}`}>
         <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={strokeWidth} />
         <circle cx={cx} cy={cx} r={r} fill="none"
-          stroke={lit ? color : 'rgba(255,255,255,0.18)'}
+          stroke={progress > 0 ? color : 'rgba(255,255,255,0.18)'}
           strokeWidth={strokeWidth} strokeLinecap="round"
           strokeDasharray={circ} strokeDashoffset={offset}
           style={{ transition: 'stroke-dashoffset 1.4s cubic-bezier(0.4,0,0.2,1)' }}
