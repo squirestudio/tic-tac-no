@@ -473,7 +473,7 @@ export default function TicTacNo() {
   const [showProfile, setShowProfile] = useState(false);
   const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
   const [badgePopupQueue, setBadgePopupQueue] = useState<string[]>([]);
-  const [badgeProgressQueue, setBadgeProgressQueue] = useState<BadgeProgressItem[]>([]);
+  const [badgeProgressItems, setBadgeProgressItems] = useState<BadgeProgressItem[]>([]);
   const [settings, setSettings] = useState<GameSettings>(() => {
     try { return { haptics: true, badgeAnimations: true, ...JSON.parse(localStorage.getItem('tat_settings') ?? '{}') }; }
     catch { return { haptics: true, badgeAnimations: true }; }
@@ -904,7 +904,7 @@ export default function TicTacNo() {
       }
     }
     if (newlyEarned.length > 0) { haptic.success(); setBadgePopupQueue(q => [...q, ...newlyEarned]); }
-    if (items.length > 0) setBadgeProgressQueue(items);
+    if (items.length > 0) setBadgeProgressItems(items);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaderboard, gamePhase]);
 
@@ -1295,7 +1295,7 @@ export default function TicTacNo() {
     humanBlockedWinRef.current = false;
     finalWordRef.current = '';
     setBadgePopupQueue([]);
-    setBadgeProgressQueue([]);
+    setBadgeProgressItems([]);
     setSetupStep('mode');
     pendingContinuationRef.current = null;
     usedWordsRef.current = new Set();
@@ -1323,7 +1323,7 @@ export default function TicTacNo() {
     humanBlockedWinRef.current = false;
     finalWordRef.current = '';
     setBadgePopupQueue([]);
-    setBadgeProgressQueue([]);
+    setBadgeProgressItems([]);
     // Refresh snapshot so rematch diffs from this game's start, not the previous game's
     statsSnapshotRef.current = profile ? (leaderboardRef.current[profile.uuid] ?? null) : null;
     countsSnapshotRef.current = { ...localCountsRef.current };
@@ -2111,8 +2111,8 @@ export default function TicTacNo() {
               <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
               <button
                 onClick={() => { shareBadge(badge.id); }}
-                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
-                <span>Share</span><span>📤</span>
+                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl">
+                Share
               </button>
               <button onClick={dismiss}
                 className="w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
@@ -2123,33 +2123,39 @@ export default function TicTacNo() {
         );
       })()}
 
-      {/* Badge progress popup — always rendered, shown after earned popups drain */}
-      {badgePopupQueue.length === 0 && badgeProgressQueue.length > 0 && settings.badgeAnimations && (() => {
-        const item = badgeProgressQueue[0];
-        const badge = BADGES.find(b => b.id === item.badgeId);
-        if (!badge) return null;
-        const imgSrc = `/badges/${badge.id}.png`;
-        const remaining = badgeProgressQueue.length - 1;
-        const dismiss = () => setBadgeProgressQueue(q => q.slice(1));
-        return (
-          <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
-            style={{ background: 'rgba(0,0,0,0.88)' }}>
-            <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
-              <p className="text-purple-400 font-black text-xs uppercase tracking-widest">Badge Progress</p>
-              <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
-                progress={item.toProgress} earned={false} size={140} strokeWidth={8}
-                animateFrom={item.fromProgress} showFull={true} />
-              <p className="text-white font-black text-xl text-center">{badge.name}</p>
-              <p className="text-white/50 text-sm text-center font-bold">{item.detail}</p>
-              <p className="text-white/40 text-xs text-center leading-relaxed">{badge.desc}</p>
-              <button onClick={dismiss}
-                className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
-                {remaining > 0 ? `Next (${remaining} more)` : 'Done'}
-              </button>
+      {/* Badge progress summary — single compact list, one tap to dismiss */}
+      {badgePopupQueue.length === 0 && badgeProgressItems.length > 0 && settings.badgeAnimations && (
+        <div className="fixed inset-0 z-90 flex items-end justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)' }}>
+          <div className="bg-slate-900 rounded-3xl border border-white/10 p-6 w-full max-w-sm shadow-2xl">
+            <p className="text-purple-400 font-black text-xs uppercase tracking-widest text-center mb-4">Badge Progress</p>
+            <div className="space-y-4 max-h-72 overflow-y-auto mb-5">
+              {badgeProgressItems.map(item => {
+                const badge = BADGES.find(b => b.id === item.badgeId);
+                if (!badge) return null;
+                return (
+                  <div key={item.badgeId} className="flex items-center gap-3">
+                    <span className="text-2xl w-8 text-center shrink-0">{badge.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-baseline mb-1">
+                        <p className="text-white font-bold text-sm">{badge.name}</p>
+                        <p className="text-white/50 text-xs ml-2 shrink-0">{item.detail}</p>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${Math.round(item.toProgress * 100)}%`, backgroundColor: badge.color }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+            <button onClick={() => setBadgeProgressItems([])}
+              className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
+              Got it
+            </button>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* Settings modal */}
       {showSettings && (
@@ -2847,8 +2853,8 @@ export default function TicTacNo() {
                 <p className="text-white font-black text-xl text-center">{badge.name}</p>
                 <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
                 <button onClick={() => { shareBadge(badge.id); }}
-                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
-                  <span>Share</span><span>📤</span>
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl">
+                  Share
                 </button>
                 <button onClick={dismiss}
                   className="w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
@@ -2858,34 +2864,40 @@ export default function TicTacNo() {
             </div>
           );
         })()}
-        {/* Badge progress popup on board result screen */}
-        {badgePopupQueue.length === 0 && badgeProgressQueue.length > 0 && settings.badgeAnimations && (() => {
-          const item = badgeProgressQueue[0];
-          const badge = BADGES.find(b => b.id === item.badgeId);
-          if (!badge) return null;
-          const imgSrc = `/badges/${badge.id}.png`;
-          const remaining = badgeProgressQueue.length - 1;
-          const dismiss = () => setBadgeProgressQueue(q => q.slice(1));
-          return (
-            <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
-              style={{ background: 'rgba(0,0,0,0.88)' }}
-              onClick={e => e.stopPropagation()}>
-              <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
-                <p className="text-purple-400 font-black text-xs uppercase tracking-widest">Badge Progress</p>
-                <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
-                  progress={item.toProgress} earned={false} size={140} strokeWidth={8}
-                  animateFrom={item.fromProgress} showFull={true} />
-                <p className="text-white font-black text-xl text-center">{badge.name}</p>
-                <p className="text-white/50 text-sm text-center font-bold">{item.detail}</p>
-                <p className="text-white/40 text-xs text-center leading-relaxed">{badge.desc}</p>
-                <button onClick={dismiss}
-                  className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
-                  {remaining > 0 ? `Next (${remaining} more)` : 'Done'}
-                </button>
+        {/* Badge progress summary on board result screen */}
+        {badgePopupQueue.length === 0 && badgeProgressItems.length > 0 && settings.badgeAnimations && (
+          <div className="fixed inset-0 z-90 flex items-end justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.75)' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="bg-slate-900 rounded-3xl border border-white/10 p-6 w-full max-w-sm shadow-2xl">
+              <p className="text-purple-400 font-black text-xs uppercase tracking-widest text-center mb-4">Badge Progress</p>
+              <div className="space-y-4 max-h-72 overflow-y-auto mb-5">
+                {badgeProgressItems.map(item => {
+                  const badge = BADGES.find(b => b.id === item.badgeId);
+                  if (!badge) return null;
+                  return (
+                    <div key={item.badgeId} className="flex items-center gap-3">
+                      <span className="text-2xl w-8 text-center shrink-0">{badge.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-baseline mb-1">
+                          <p className="text-white font-bold text-sm">{badge.name}</p>
+                          <p className="text-white/50 text-xs ml-2 shrink-0">{item.detail}</p>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${Math.round(item.toProgress * 100)}%`, backgroundColor: badge.color }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+              <button onClick={() => setBadgeProgressItems([])}
+                className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
+                Got it
+              </button>
             </div>
-          );
-        })()}
+          </div>
+        )}
       </div>
     );
   }
@@ -2911,8 +2923,8 @@ export default function TicTacNo() {
                 <p className="text-white font-black text-xl text-center">{badge.name}</p>
                 <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
                 <button onClick={() => { shareBadge(badge.id); }}
-                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
-                  <span>Share</span><span>📤</span>
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl">
+                  Share
                 </button>
                 <button onClick={dismiss}
                   className="w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
@@ -2922,33 +2934,39 @@ export default function TicTacNo() {
             </div>
           );
         })()}
-        {/* Badge progress popup */}
-        {badgePopupQueue.length === 0 && badgeProgressQueue.length > 0 && settings.badgeAnimations && (() => {
-          const item = badgeProgressQueue[0];
-          const badge = BADGES.find(b => b.id === item.badgeId);
-          if (!badge) return null;
-          const imgSrc = `/badges/${badge.id}.png`;
-          const remaining = badgeProgressQueue.length - 1;
-          const dismiss = () => setBadgeProgressQueue(q => q.slice(1));
-          return (
-            <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
-              style={{ background: 'rgba(0,0,0,0.88)' }}>
-              <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
-                <p className="text-purple-400 font-black text-xs uppercase tracking-widest">Badge Progress</p>
-                <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
-                  progress={item.toProgress} earned={false} size={140} strokeWidth={8}
-                  animateFrom={item.fromProgress} showFull={true} />
-                <p className="text-white font-black text-xl text-center">{badge.name}</p>
-                <p className="text-white/50 text-sm text-center font-bold">{item.detail}</p>
-                <p className="text-white/40 text-xs text-center leading-relaxed">{badge.desc}</p>
-                <button onClick={dismiss}
-                  className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
-                  {remaining > 0 ? `Next (${remaining} more)` : 'Done'}
-                </button>
+        {/* Badge progress summary — compact list, one tap to dismiss */}
+        {badgePopupQueue.length === 0 && badgeProgressItems.length > 0 && settings.badgeAnimations && (
+          <div className="fixed inset-0 z-90 flex items-end justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.75)' }}>
+            <div className="bg-slate-900 rounded-3xl border border-white/10 p-6 w-full max-w-sm shadow-2xl">
+              <p className="text-purple-400 font-black text-xs uppercase tracking-widest text-center mb-4">Badge Progress</p>
+              <div className="space-y-4 max-h-72 overflow-y-auto mb-5">
+                {badgeProgressItems.map(item => {
+                  const badge = BADGES.find(b => b.id === item.badgeId);
+                  if (!badge) return null;
+                  return (
+                    <div key={item.badgeId} className="flex items-center gap-3">
+                      <span className="text-2xl w-8 text-center shrink-0">{badge.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-baseline mb-1">
+                          <p className="text-white font-bold text-sm">{badge.name}</p>
+                          <p className="text-white/50 text-xs ml-2 shrink-0">{item.detail}</p>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${Math.round(item.toProgress * 100)}%`, backgroundColor: badge.color }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+              <button onClick={() => setBadgeProgressItems([])}
+                className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
+                Got it
+              </button>
             </div>
-          );
-        })()}
+          </div>
+        )}
         {showReviewPrompt && (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
             <div className="bg-slate-900 border border-purple-500/40 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
