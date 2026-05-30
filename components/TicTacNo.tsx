@@ -2830,6 +2830,62 @@ export default function TicTacNo() {
           </div>
         </div>
         <p className="text-white/40 text-sm animate-pulse">Tap anywhere to see results</p>
+        {/* Badge earned popup on board result screen */}
+        {badgePopupQueue.length > 0 && (() => {
+          const badge = BADGES.find(b => b.id === badgePopupQueue[0]);
+          if (!badge) return null;
+          const imgSrc = `/badges/${badge.id}.png`;
+          const dismiss = () => setBadgePopupQueue(q => q.slice(1));
+          return (
+            <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
+              style={{ background: 'rgba(0,0,0,0.88)' }}
+              onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
+                <p className="text-yellow-400 font-black text-xs uppercase tracking-widest">Badge Unlocked!</p>
+                <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                  progress={1} earned={true} size={140} strokeWidth={8} />
+                <p className="text-white font-black text-xl text-center">{badge.name}</p>
+                <p className="text-white/60 text-sm text-center leading-relaxed">{badge.desc}</p>
+                <button onClick={() => { shareBadge(badge.id); }}
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+                  <span>Share</span><span>📤</span>
+                </button>
+                <button onClick={dismiss}
+                  className="w-full py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm">
+                  Got it
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* Badge progress popup on board result screen */}
+        {badgePopupQueue.length === 0 && badgeProgressQueue.length > 0 && settings.badgeAnimations && (() => {
+          const item = badgeProgressQueue[0];
+          const badge = BADGES.find(b => b.id === item.badgeId);
+          if (!badge) return null;
+          const imgSrc = `/badges/${badge.id}.png`;
+          const remaining = badgeProgressQueue.length - 1;
+          const dismiss = () => setBadgeProgressQueue(q => q.slice(1));
+          return (
+            <div className="fixed inset-0 z-90 flex items-center justify-center p-6"
+              style={{ background: 'rgba(0,0,0,0.88)' }}
+              onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 max-w-xs w-full flex flex-col items-center gap-4 shadow-2xl">
+                <p className="text-purple-400 font-black text-xs uppercase tracking-widest">Badge Progress</p>
+                <BadgeRing emoji={badge.emoji} imgSrc={imgSrc} color={badge.color}
+                  progress={item.toProgress} earned={false} size={140} strokeWidth={8}
+                  animateFrom={item.fromProgress} showFull={true} />
+                <p className="text-white font-black text-xl text-center">{badge.name}</p>
+                <p className="text-white/50 text-sm text-center font-bold">{item.detail}</p>
+                <p className="text-white/40 text-xs text-center leading-relaxed">{badge.desc}</p>
+                <button onClick={dismiss}
+                  className="w-full py-3 rounded-xl bg-white/10 text-white font-bold text-sm">
+                  {remaining > 0 ? `Next (${remaining} more)` : 'Done'}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -2925,17 +2981,6 @@ export default function TicTacNo() {
             </div>
           </div>
         )}
-        {/* DEBUG — remove after confirming badge progress works */}
-        <div className="fixed top-0 left-0 right-0 z-[200] bg-black/90 text-green-400 text-[10px] font-mono p-1 flex flex-wrap gap-x-2">
-          <span>profile:{profile?.uuid?.slice(0,6) ?? 'NULL'}</span>
-          <span>anim:{settings.badgeAnimations ? 'ON' : 'OFF'}</span>
-          <span>popQ:{badgePopupQueue.length}</span>
-          <span>progQ:{badgeProgressQueue.length}</span>
-          <span>fromGP:{statsSnapshotRef.current?.gamesPlayed ?? 'null'}</span>
-          <span>toGP:{profile ? (leaderboard[profile.uuid]?.gamesPlayed ?? 'none') : 'noprofile'}</span>
-          <span>fromEasy:{statsSnapshotRef.current?.winsVsEasy ?? 'null'}</span>
-          <span>toEasy:{profile ? (leaderboard[profile.uuid]?.winsVsEasy ?? 'none') : 'noprofile'}</span>
-        </div>
         <div className="text-center max-w-md">
           <div className="text-6xl mb-4 animate-bounce">🏆</div>
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4">
