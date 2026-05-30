@@ -40,7 +40,7 @@ type PlayerStats = {
 type LeaderboardData = { [uuid: string]: PlayerStats };
 type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
 type MpPlayer = { uuid: string; gamertag: string; avatarUrl: string; slot: number; color: string };
-type GameSettings = { haptics: boolean; badgeAnimations: boolean };
+type GameSettings = { haptics: boolean; badgeAnimations: boolean; music: boolean };
 type BadgeProgressItem = { badgeId: string; fromProgress: number; toProgress: number; detail: string };
 type RemoteLastMove = { slot: number; action: string; type: 'placement' | 'battle'; battleNarrative?: string; challenger?: string; challengerOwner?: number; defenderObject?: string; defenderOwner?: number; battleWinner?: string };
 type RemoteGameState = { code: string; phase: 'waiting' | 'playing' | 'gameOver'; players: MpPlayer[]; board: Cell[]; currentSlot: number; winner: number | null; lastMove: RemoteLastMove | null; hostUUID: string; updatedAt: number };
@@ -374,6 +374,7 @@ export default function TicTacNo() {
   const inputRef = useRef<HTMLInputElement>(null);
   const gamesPlayedRef = useRef(0);
   const interstitialReadyRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   // Live refs so setTimeout callbacks always read current state, not stale closures
   const leaderboardRef = useRef<LeaderboardData>({});
   const localBadgesRef = useRef<Set<string>>(new Set());
@@ -470,8 +471,8 @@ export default function TicTacNo() {
   const [badgePopupQueue, setBadgePopupQueue] = useState<string[]>([]);
   const [badgeProgressItems, setBadgeProgressItems] = useState<BadgeProgressItem[]>([]);
   const [settings, setSettings] = useState<GameSettings>(() => {
-    try { return { haptics: true, badgeAnimations: true, ...JSON.parse(localStorage.getItem('tat_settings') ?? '{}') }; }
-    catch { return { haptics: true, badgeAnimations: true }; }
+    try { return { haptics: true, badgeAnimations: true, music: true, ...JSON.parse(localStorage.getItem('tat_settings') ?? '{}') }; }
+    catch { return { haptics: true, badgeAnimations: true, music: true }; }
   });
   const [showSettings, setShowSettings] = useState(false);
   const statsSnapshotRef = useRef<PlayerStats | null>(null);
@@ -843,6 +844,39 @@ export default function TicTacNo() {
     _hapticsEnabled = settings.haptics;
     try { localStorage.setItem('tat_settings', JSON.stringify(settings)); } catch {}
   }, [settings]);
+
+  // ── Background music ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const audio = new Audio('/music/game.mp3');
+    audio.loop = true;
+    audio.volume = 0.4;
+    audioRef.current = audio;
+    return () => { audio.pause(); audio.src = ''; };
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (settings.music && gamePhase === 'playing') {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [settings.music, gamePhase]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (document.hidden) {
+        audio.pause();
+      } else if (settings.music && gamePhase === 'playing') {
+        audio.play().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [settings.music, gamePhase]);
 
   // Keep live refs current so setTimeout callbacks never read stale state
   useEffect(() => { leaderboardRef.current = leaderboard; }, [leaderboard]);
@@ -2283,15 +2317,18 @@ export default function TicTacNo() {
               </div>
             </div>
 
-            {/* Coming soon */}
             <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">Sound</p>
             <div className="bg-slate-800/60 rounded-2xl overflow-hidden divide-y divide-white/5">
-              <div className="flex items-center justify-between px-4 py-3.5 opacity-40">
+              <div className="flex items-center justify-between px-4 py-3.5">
                 <div>
                   <p className="text-white font-bold text-sm">Music</p>
                   <p className="text-white/40 text-xs">Background music during games</p>
                 </div>
-                <p className="text-white/40 text-xs font-bold">Coming soon</p>
+                <button
+                  onClick={() => setSettings(s => ({ ...s, music: !s.music }))}
+                  className={`w-12 h-7 rounded-full transition-colors relative ${settings.music ? 'bg-purple-500' : 'bg-white/20'}`}>
+                  <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${settings.music ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`} />
+                </button>
               </div>
               <div className="flex items-center justify-between px-4 py-3.5 opacity-40">
                 <div>
