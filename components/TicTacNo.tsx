@@ -2871,7 +2871,7 @@ export default function TicTacNo() {
                   if (!badge) return null;
                   return (
                     <div key={item.badgeId} className="flex items-center gap-3">
-                      <span className="text-2xl w-8 text-center shrink-0">{badge.emoji}</span>
+                      <img src={`/badges/${badge.id}.png`} alt={badge.name} className="w-10 h-10 shrink-0 object-contain rounded-full" />
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-baseline mb-1">
                           <p className="text-white font-bold text-sm">{badge.name}</p>
@@ -2940,7 +2940,7 @@ export default function TicTacNo() {
                   if (!badge) return null;
                   return (
                     <div key={item.badgeId} className="flex items-center gap-3">
-                      <span className="text-2xl w-8 text-center shrink-0">{badge.emoji}</span>
+                      <img src={`/badges/${badge.id}.png`} alt={badge.name} className="w-10 h-10 shrink-0 object-contain rounded-full" />
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-baseline mb-1">
                           <p className="text-white font-bold text-sm">{badge.name}</p>
