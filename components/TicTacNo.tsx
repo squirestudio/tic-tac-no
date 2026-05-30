@@ -368,6 +368,7 @@ export default function TicTacNo() {
     } catch { return { party_crasher_count: 0, word_nerd_count: 0 }; }
   });
   const finalWordRef = useRef<string>('');
+  const lastBattleLoserRef = useRef<string>('');
   const pendingImages = useRef<Set<string>>(new Set());
   const validationCache = useRef<Map<string, boolean>>(new Map());
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1138,6 +1139,7 @@ export default function TicTacNo() {
             const gameWinner = checkWinner(newBoard);
             if (gameWinner !== null) {
               finalWordRef.current = winnerWord;
+              lastBattleLoserRef.current = loserWord;
               // Terminator: profile player won via a battle
               const profIdx = players.findIndex(p => p.profileUUID && !p.isAI);
               if (profIdx >= 0 && gameWinner === profIdx && playerMakingMove === profIdx && challengerWon) {
@@ -1288,6 +1290,7 @@ export default function TicTacNo() {
     winningMoveWasBattleRef.current = false;
     humanBlockedWinRef.current = false;
     finalWordRef.current = '';
+    lastBattleLoserRef.current = '';
     setBadgePopupQueue([]);
     setBadgeProgressItems([]);
     setSetupStep('mode');
@@ -1316,6 +1319,7 @@ export default function TicTacNo() {
     winningMoveWasBattleRef.current = false;
     humanBlockedWinRef.current = false;
     finalWordRef.current = '';
+    lastBattleLoserRef.current = '';
     setBadgePopupQueue([]);
     setBadgeProgressItems([]);
     // Refresh snapshot so rematch diffs from this game's start, not the previous game's
@@ -1526,29 +1530,118 @@ export default function TicTacNo() {
     }
   }, []);
 
+  const captureBoardImage = useCallback(async (): Promise<string | null> => {
+    try {
+      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      const cellSize = 280;
+      const gap = 8;
+      const pad = 16;
+      const gridW = cellSize * 3 + gap * 2;
+      const canvasW = gridW + pad * 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasW;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      ctx.fillStyle = '#0d0b1e';
+      ctx.fillRect(0, 0, canvasW, canvasW);
+
+      const loadedImgs: (HTMLImageElement | null)[] = await Promise.all(
+        board.map(async (cell) => {
+          if (!cell) return null;
+          const url = imageCache[cell.object.toLowerCase()];
+          if (!url) return null;
+          try {
+            const blob = await fetch(url).then(r => r.blob());
+            const objUrl = URL.createObjectURL(blob);
+            return await new Promise<HTMLImageElement | null>((resolve) => {
+              const img = new Image();
+              img.onload = () => { URL.revokeObjectURL(objUrl); resolve(img); };
+              img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(null); };
+              img.src = objUrl;
+            });
+          } catch { return null; }
+        })
+      );
+
+      const rr = (x: number, y: number, w: number, h: number, r: number) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+        ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+        ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+        ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+        ctx.closePath();
+      };
+
+      for (let i = 0; i < 9; i++) {
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const x = pad + col * (cellSize + gap);
+        const y = pad + row * (cellSize + gap);
+        const cell = board[i];
+        const color = cell ? players[cell.owner].color : '#4a5568';
+
+        rr(x, y, cellSize, cellSize, 14);
+        ctx.fillStyle = cell ? color + '30' : '#33415560';
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        if (cell) {
+          const img = loadedImgs[i];
+          if (img) {
+            ctx.save();
+            rr(x, y, cellSize, cellSize, 14);
+            ctx.clip();
+            ctx.drawImage(img, x, y, cellSize, cellSize);
+            ctx.restore();
+          }
+          const labelH = 44;
+          ctx.fillStyle = 'rgba(0,0,0,0.65)';
+          ctx.fillRect(x, y + cellSize - labelH, cellSize, labelH);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 20px -apple-system, Helvetica, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cell.object, x + cellSize / 2, y + cellSize - labelH / 2);
+        }
+      }
+
+      const b64 = canvas.toDataURL('image/png').split(',')[1];
+      const result = await Filesystem.writeFile({ path: 'tat_board.png', data: b64, directory: Directory.Cache });
+      return result.uri;
+    } catch { return null; }
+  }, [board, players, imageCache]);
+
   const shareWin = useCallback(async () => {
     const aiOpponent = players.find(p => p.isAI);
     const humanOpponent = players.find(p => !p.isAI && p.profileUUID !== profile?.uuid);
 
-    let opponentTag: string;
+    let opponentName: string;
     if (aiOpponent) {
-      const diffLabel = { easy: 'Easy AI', medium: 'Medium AI', hard: 'Hard AI' }[aiOpponent.difficulty];
-      opponentTag = `#${diffLabel.replace(' ', '')}`;
+      opponentName = { easy: 'Easy AI', medium: 'Medium AI', hard: 'Hard AI' }[aiOpponent.difficulty];
     } else if (humanOpponent?.name) {
-      opponentTag = `#${humanOpponent.name.replace(/\s+/g, '')}`;
+      opponentName = humanOpponent.name;
     } else {
-      opponentTag = 'a friend';
+      opponentName = 'a friend';
     }
 
-    const finalWord = finalWordRef.current;
-    const wordPart = finalWord ? ` with a #${finalWord.replace(/\s+/g, '')}` : '';
-    const rpText = myRPDelta !== null && myRPDelta > 0 ? ` +${myRPDelta} RP` : '';
+    const winnerWord = finalWordRef.current;
+    const loserWord = lastBattleLoserRef.current;
     const appUrl = `https://apps.apple.com/us/app/tic-attack-toe/id${APP_STORE_ID}`;
-    const text = `I just beat ${opponentTag} in Tic Attack Toe${wordPart}!${rpText}\n\nCome join the fun!\n${appUrl}`;
+
+    let text = `I just beat ${opponentName} in Tic Attack Toe!`;
+    if (winningMoveWasBattleRef.current && winnerWord && loserWord) {
+      text = `I just beat ${opponentName} in Tic Attack Toe. Turns out '${winnerWord}' beats '${loserWord}'!`;
+    }
+    text += `\n\n${appUrl}`;
 
     try {
       const { Share } = await import('@capacitor/share');
-      const imgUri = await writeImageToCache('/logo.png', 'tat_logo.png');
+      const imgUri = await captureBoardImage();
       await Share.share({
         title: 'I won in Tic Attack Toe!',
         text,
@@ -1557,7 +1650,7 @@ export default function TicTacNo() {
       });
       haptic.light();
     } catch {}
-  }, [players, myRPDelta, profile, writeImageToCache]);
+  }, [players, profile, captureBoardImage]);
 
   const shareBadge = useCallback(async (badgeId: string) => {
     const badge = BADGES.find(b => b.id === badgeId);
