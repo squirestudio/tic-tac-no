@@ -2120,7 +2120,7 @@ export default function TicTacNo() {
       {/* Badge progress summary — single compact list, one tap to dismiss */}
       {badgePopupQueue.length === 0 && badgeProgressItems.length > 0 && settings.badgeAnimations && (
         <div className="fixed inset-0 z-90 flex items-end justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.75)' }}>
+          style={{ background: 'rgba(0,0,0,0.75)', paddingBottom: '90px' }}>
           <div className="bg-slate-900 rounded-3xl border border-white/10 p-6 w-full max-w-sm shadow-2xl">
             <p className="text-purple-400 font-black text-xs uppercase tracking-widest text-center mb-4">Badge Progress</p>
             <div className="space-y-4 max-h-72 overflow-y-auto mb-5">
@@ -2861,7 +2861,7 @@ export default function TicTacNo() {
         {/* Badge progress summary on board result screen */}
         {badgePopupQueue.length === 0 && badgeProgressItems.length > 0 && settings.badgeAnimations && (
           <div className="fixed inset-0 z-90 flex items-end justify-center p-4"
-            style={{ background: 'rgba(0,0,0,0.75)' }}
+            style={{ background: 'rgba(0,0,0,0.75)', paddingBottom: '90px' }}
             onClick={e => e.stopPropagation()}>
             <div className="bg-slate-900 rounded-3xl border border-white/10 p-6 w-full max-w-sm shadow-2xl">
               <p className="text-purple-400 font-black text-xs uppercase tracking-widest text-center mb-4">Badge Progress</p>
