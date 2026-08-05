@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Crown, ArrowLeft, Send, Settings } from 'lucide-react';
+import { RotateCcw, Crown, ArrowLeft, Send, Settings, Share2 } from 'lucide-react';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { logEvent } from '@/lib/analytics';
 
 let _hapticsEnabled = true;
 const haptic = {
@@ -15,6 +16,83 @@ const haptic = {
     if (!_hapticsEnabled) return;
     Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
     setTimeout(() => Haptics.notification({ type: NotificationType.Success }).catch(() => {}), 200);
+  },
+};
+
+let _sfxEnabled = true;
+let _sfxVolume = 0.8;
+let _audioCtx: AudioContext | null = null;
+function getAudioCtx(): AudioContext {
+  if (!_audioCtx) _audioCtx = new AudioContext();
+  return _audioCtx;
+}
+const sfx = {
+  place: () => {
+    if (!_sfxEnabled) return;
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(180, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(_sfxVolume * 0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.12);
+    } catch {}
+  },
+  battleWin: () => {
+    if (!_sfxEnabled) return;
+    try {
+      const ctx = getAudioCtx();
+      const notes = [523, 659, 784]; // C5-E5-G5
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        const t = ctx.currentTime + i * 0.1;
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(_sfxVolume * 0.35, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        osc.start(t); osc.stop(t + 0.18);
+      });
+    } catch {}
+  },
+  battleLose: () => {
+    if (!_sfxEnabled) return;
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(350, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(_sfxVolume * 0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
+    } catch {}
+  },
+  victory: () => {
+    if (!_sfxEnabled) return;
+    try {
+      const ctx = getAudioCtx();
+      const notes = [523, 659, 784, 1047]; // C5-E5-G5-C6
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        const t = ctx.currentTime + i * 0.12;
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(_sfxVolume * 0.4, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+        osc.start(t); osc.stop(t + 0.22);
+      });
+    } catch {}
   },
 };
 
@@ -40,7 +118,7 @@ type PlayerStats = {
 type LeaderboardData = { [uuid: string]: PlayerStats };
 type Profile = { uuid: string; gamertag: string; avatarWord: string; avatarUrl: string; pinSet?: boolean };
 type MpPlayer = { uuid: string; gamertag: string; avatarUrl: string; slot: number; color: string };
-type GameSettings = { haptics: boolean; badgeAnimations: boolean; music: boolean };
+type GameSettings = { haptics: boolean; badgeAnimations: boolean; music: boolean; musicVolume: number; sfx: boolean; sfxVolume: number };
 type BadgeProgressItem = { badgeId: string; fromProgress: number; toProgress: number; detail: string };
 type RemoteLastMove = { slot: number; action: string; type: 'placement' | 'battle'; battleNarrative?: string; challenger?: string; challengerOwner?: number; defenderObject?: string; defenderOwner?: number; battleWinner?: string };
 type RemoteGameState = { code: string; phase: 'waiting' | 'playing' | 'gameOver'; players: MpPlayer[]; board: Cell[]; currentSlot: number; winner: number | null; lastMove: RemoteLastMove | null; hostUUID: string; updatedAt: number };
@@ -340,7 +418,7 @@ export default function TicTacNo() {
   const [selectedCell, setSelectedCell] = useState<number | null>(null);
   const [objectInput, setObjectInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [battleLog, setBattleLog] = useState<Array<{ challenger: string; defender: string; winner: string; spot: number }>>([]);
+
   const [winner, setWinner] = useState<number | null>(null);
   const [showBoardResult, setShowBoardResult] = useState(false);
   const [battleAnimation, setBattleAnimation] = useState<BattleAnimation | null>(null);
@@ -356,12 +434,14 @@ export default function TicTacNo() {
   const winningMoveWasBattleRef = useRef(false);
   const humanBlockedWinRef = useRef(false);
   const [localBadges, setLocalBadges] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set<string>();
     try {
       const stored = JSON.parse(localStorage.getItem('tat_badges') ?? '{}');
       return new Set<string>(Object.keys(stored).filter(k => stored[k]));
     } catch { return new Set<string>(); }
   });
   const [localCounts, setLocalCounts] = useState<{ party_crasher_count: number; word_nerd_count: number }>(() => {
+    if (typeof window === 'undefined') return { party_crasher_count: 0, word_nerd_count: 0 };
     try {
       const stored = JSON.parse(localStorage.getItem('tat_badge_counts') ?? '{}');
       return { party_crasher_count: stored.party_crasher_count ?? 0, word_nerd_count: stored.word_nerd_count ?? 0 };
@@ -375,6 +455,7 @@ export default function TicTacNo() {
   const gamesPlayedRef = useRef(0);
   const interstitialReadyRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const musicGainRef = useRef<GainNode | null>(null);
   // Live refs so setTimeout callbacks always read current state, not stale closures
   const leaderboardRef = useRef<LeaderboardData>({});
   const localBadgesRef = useRef<Set<string>>(new Set());
@@ -402,7 +483,7 @@ export default function TicTacNo() {
   const fetchImageRef = useRef<(word: string) => void>(() => {});
   const [mpConnectionLost, setMpConnectionLost] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
-  const [showBattleLog, setShowBattleLog] = useState(false);
+
   const [isRanked, setIsRanked] = useState(true);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
 
@@ -462,6 +543,7 @@ export default function TicTacNo() {
   }, [gamePhase]);
 
   const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window === 'undefined') return null;
     try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? 'null'); }
     catch { return null; }
   });
@@ -471,8 +553,9 @@ export default function TicTacNo() {
   const [badgePopupQueue, setBadgePopupQueue] = useState<string[]>([]);
   const [badgeProgressItems, setBadgeProgressItems] = useState<BadgeProgressItem[]>([]);
   const [settings, setSettings] = useState<GameSettings>(() => {
-    try { return { haptics: true, badgeAnimations: true, music: true, ...JSON.parse(localStorage.getItem('tat_settings') ?? '{}') }; }
-    catch { return { haptics: true, badgeAnimations: true, music: true }; }
+    if (typeof window === 'undefined') return { haptics: true, badgeAnimations: true, music: true, musicVolume: 0.2, sfx: true, sfxVolume: 0.8 };
+    try { return { haptics: true, badgeAnimations: true, music: true, musicVolume: 0.2, sfx: true, sfxVolume: 0.8, ...JSON.parse(localStorage.getItem('tat_settings') ?? '{}') }; }
+    catch { return { haptics: true, badgeAnimations: true, music: true, musicVolume: 0.2, sfx: true, sfxVolume: 0.8 }; }
   });
   const [showSettings, setShowSettings] = useState(false);
   const statsSnapshotRef = useRef<PlayerStats | null>(null);
@@ -497,6 +580,7 @@ export default function TicTacNo() {
   const [siLoading, setSiLoading] = useState(false);
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardData>(() => {
+    if (typeof window === 'undefined') return {};
     try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY) ?? '{}'); }
     catch { return {}; }
   });
@@ -510,14 +594,17 @@ export default function TicTacNo() {
 
   useEffect(() => {
     if (!showLeaderboard) return;
-    // Wait one frame for the DOM to render, then center the user's row
-    const id = requestAnimationFrame(() => {
+    const id = setTimeout(() => {
       const container = lbContainerRef.current;
       const row = lbUserRowRef.current;
       if (!container || !row) return;
-      container.scrollTop = row.offsetTop - container.clientHeight / 2 + row.clientHeight / 2;
-    });
-    return () => cancelAnimationFrame(id);
+      // getBoundingClientRect is viewport-relative and works reliably in Capacitor WebView
+      const containerRect = container.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const offset = (rowRect.top - containerRect.top) - (containerRect.height / 2) + (rowRect.height / 2);
+      container.scrollTop += offset;
+    }, 200);
+    return () => clearTimeout(id);
   }, [showLeaderboard]);
 
   // Fetch global leaderboard on mount and when leaderboard modal opens
@@ -713,6 +800,16 @@ export default function TicTacNo() {
 
     const ranked = gameMode === 'multiplayer' || isRanked;
 
+    const profilePlayerIdx = players.findIndex(p => p.profileUUID === profile?.uuid);
+    if (profilePlayerIdx >= 0) {
+      const won = profilePlayerIdx === winner;
+      logEvent(won ? 'game_won' : 'game_lost', {
+        mode: gameMode,
+        ranked,
+        via_battle: winningMoveWasBattleRef.current,
+      });
+    }
+
     const posts = signedInPlayers.map(async p => {
       const playerIdx = players.indexOf(p);
       const won = playerIdx === winner;
@@ -818,6 +915,10 @@ export default function TicTacNo() {
         if (trulyNew.length > 0) {
           haptic.success();
           setBadgePopupQueue(q => [...q, ...trulyNew]);
+          trulyNew.forEach(id => {
+            const badge = BADGES.find(b => b.id === id);
+            if (badge) logEvent('badge_earned', { badge_id: id, badge_name: badge.name });
+          });
         }
       } catch {}
     }
@@ -839,9 +940,13 @@ export default function TicTacNo() {
     } catch {}
   }, [myRPDelta]);
 
-  // ── Settings persistence & haptics flag ───────────────────────────────────
+  // ── Settings persistence & module-level flags ─────────────────────────────
   useEffect(() => {
     _hapticsEnabled = settings.haptics;
+    _sfxEnabled = settings.sfx;
+    _sfxVolume = settings.sfxVolume;
+    // iOS ignores HTMLAudioElement.volume — control via Web Audio gain node instead
+    if (musicGainRef.current) musicGainRef.current.gain.value = settings.musicVolume;
     try { localStorage.setItem('tat_settings', JSON.stringify(settings)); } catch {}
   }, [settings]);
 
@@ -849,19 +954,34 @@ export default function TicTacNo() {
   useEffect(() => {
     const audio = new Audio('/music/game.mp3');
     audio.loop = true;
-    audio.volume = 0.4;
+    audio.volume = settings.musicVolume;
     audioRef.current = audio;
     return () => { audio.pause(); audio.src = ''; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     if (settings.music && gamePhase === 'playing') {
+      // Connect through a Web Audio gain node on first play so volume is controllable on iOS
+      if (!musicGainRef.current) {
+        try {
+          const ctx = getAudioCtx();
+          if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+          const src = ctx.createMediaElementSource(audio);
+          const gain = ctx.createGain();
+          gain.gain.value = settings.musicVolume ?? 0.2;
+          src.connect(gain);
+          gain.connect(ctx.destination);
+          musicGainRef.current = gain;
+        } catch {}
+      }
       audio.play().catch(() => {});
     } else {
       audio.pause();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.music, gamePhase]);
 
   useEffect(() => {
@@ -944,7 +1064,7 @@ export default function TicTacNo() {
       const total = (parseInt(localStorage.getItem('tat_total_games') ?? '0') || 0) + 1;
       localStorage.setItem('tat_total_games', String(total));
       const nextPrompt = parseInt(localStorage.getItem('tat_review_next') ?? '5') || 5;
-      if (total >= nextPrompt) { haptic.light(); setShowReviewPrompt(true); }
+      if (total >= nextPrompt) { haptic.light(); setShowReviewPrompt(true); logEvent('review_prompt_shown'); }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase]);
@@ -1086,12 +1206,14 @@ export default function TicTacNo() {
         newBoard[index] = newCell;
         setBoard(newBoard);
         setLastMove({ player: players[playerMakingMove].name, action: `Placed "${object}" on square ${index + 1}`, type: 'placement' });
+        const profIdxPlace = players.findIndex(p => p.profileUUID && !p.isAI);
+        if (profIdxPlace >= 0 && playerMakingMove === profIdxPlace) sfx.place();
 
         const gameWinner = checkWinner(newBoard);
         if (gameWinner !== null) {
           finalWordRef.current = object;
           const profIdxP = players.findIndex(p => p.profileUUID && !p.isAI);
-          if (profIdxP >= 0 && gameWinner === profIdxP) haptic.win();
+          if (profIdxP >= 0 && gameWinner === profIdxP) { haptic.win(); sfx.victory(); }
           else if (profIdxP >= 0) haptic.error();
           setWinner(gameWinner);
           setShowBoardResult(true);
@@ -1132,14 +1254,15 @@ export default function TicTacNo() {
           setBoard(newBoard);
           setBattleAnimation(prev => prev ? { ...prev, winner: winnerWord } : null);
 
-          // Haptic feedback for battle result (human player only)
+          // Haptic + SFX feedback for battle result (human player only)
           const profilePlayerIdxB = players.findIndex(p => p.profileUUID && !p.isAI);
           if (profilePlayerIdxB >= 0) {
             const humanInvolved = playerMakingMove === profilePlayerIdxB || existing.owner === profilePlayerIdxB;
             if (humanInvolved) {
               const humanWon = (playerMakingMove === profilePlayerIdxB && challengerWon) ||
                                (existing.owner === profilePlayerIdxB && !challengerWon);
-              if (humanWon) haptic.success(); else haptic.error();
+              if (humanWon) { haptic.success(); sfx.battleWin(); logEvent('battle_won', { attacker_word: object, defender_word: existing.object }); }
+              else { haptic.error(); sfx.battleLose(); logEvent('battle_lost', { attacker_word: object, defender_word: existing.object }); }
             }
           }
 
@@ -1156,12 +1279,6 @@ export default function TicTacNo() {
           }
 
           pendingContinuationRef.current = () => {
-            setBattleLog(prev => [...prev, {
-              challenger: object,
-              defender: existing.object,
-              winner: winnerWord,
-              spot: index,
-            }]);
             setBattleAnimation(null);
             setBattleNarrative('');
             setLastMove({
@@ -1179,7 +1296,7 @@ export default function TicTacNo() {
               if (profIdx >= 0 && gameWinner === profIdx && playerMakingMove === profIdx && challengerWon) {
                 winningMoveWasBattleRef.current = true;
               }
-              if (profIdx >= 0 && gameWinner === profIdx) haptic.win();
+              if (profIdx >= 0 && gameWinner === profIdx) { haptic.win(); sfx.victory(); }
               else if (profIdx >= 0) haptic.error();
               setWinner(gameWinner);
               setShowBoardResult(true);
@@ -1309,7 +1426,7 @@ export default function TicTacNo() {
     setCurrentPlayer(0);
     setSelectedCell(null);
     setObjectInput('');
-    setBattleLog([]);
+
     setWinner(null);
     setBattleAnimation(null);
     setBattleNarrative('');
@@ -1339,7 +1456,7 @@ export default function TicTacNo() {
     setCurrentPlayer(0);
     setSelectedCell(null);
     setObjectInput('');
-    setBattleLog([]);
+
     setWinner(null);
     setBattleAnimation(null);
     setBattleNarrative('');
@@ -1475,6 +1592,7 @@ export default function TicTacNo() {
       setMySlot(data.slot);
       setMpIsHost(true);
       setGameMode('multiplayer');
+      logEvent('multiplayer_room_created');
       setMpPlayers([{ uuid: profile.uuid, gamertag: profile.gamertag, avatarUrl: profile.avatarUrl, slot: 0, color: data.color }]);
       setMpPhase('waiting');
       lastSeenUpdatedAt.current = 0;
@@ -1499,6 +1617,7 @@ export default function TicTacNo() {
       setMySlot(data.slot);
       setMpIsHost(false);
       setGameMode('multiplayer');
+      logEvent('multiplayer_room_joined');
       setMpPhase('waiting');
       lastSeenUpdatedAt.current = 0;
     } catch { setMpError('Connection error. Try again.'); }
@@ -1527,6 +1646,7 @@ export default function TicTacNo() {
         body: JSON.stringify({ action: 'rematch', code: roomCodeRef.current, uuid: profile.uuid }),
       });
       if (res.ok) {
+        logEvent('rematch_requested', { mode: 'multiplayer' });
         // Host navigates immediately; non-hosts pick it up via polling
         setBoard(Array(9).fill(null));
         setWinner(null);
@@ -1650,6 +1770,135 @@ export default function TicTacNo() {
     } catch { return null; }
   }, [board, players, imageCache]);
 
+  const shareNarrative = useCallback(async () => {
+    if (!battleAnimation?.winner) return;
+    const loser = battleAnimation.winner.toLowerCase() === battleAnimation.challenger.toLowerCase()
+      ? battleAnimation.defenderObject
+      : battleAnimation.challenger;
+    const shareText = `"${battleAnimation.winner}" beats "${loser}" in Tic Attack Toe!`;
+    try {
+      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      const W = 600;
+      const imgSize = 180;
+      const pad = 28;
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = 900;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const loadImg = async (url?: string): Promise<HTMLImageElement | null> => {
+        if (!url) return null;
+        try {
+          const blob = await fetch(url).then(r => r.blob());
+          const objUrl = URL.createObjectURL(blob);
+          return await new Promise<HTMLImageElement | null>((resolve) => {
+            const img = new Image();
+            img.onload = () => { URL.revokeObjectURL(objUrl); resolve(img); };
+            img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(null); };
+            img.src = objUrl;
+          });
+        } catch { return null; }
+      };
+
+      const defUrl = imageCache[battleAnimation.defenderObject.toLowerCase()];
+      const atkUrl = imageCache[battleAnimation.challenger.toLowerCase()];
+      const [defImgEl, atkImgEl] = await Promise.all([loadImg(defUrl), loadImg(atkUrl)]);
+
+      // Background
+      const bg = ctx.createLinearGradient(0, 0, 0, 900);
+      bg.addColorStop(0, '#1e293b'); bg.addColorStop(1, '#0f172a');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, 900);
+
+      // Rounded rect helper
+      const rr = (x: number, y: number, w: number, h: number, r: number) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+        ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+        ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+        ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+        ctx.closePath();
+      };
+
+      // Card border
+      ctx.strokeStyle = '#eab308'; ctx.lineWidth = 3;
+      rr(10, 10, W - 20, 880, 20); ctx.stroke();
+
+      // Labels
+      ctx.font = '500 22px -apple-system, Helvetica, sans-serif';
+      ctx.fillStyle = '#94a3b8'; ctx.textAlign = 'center';
+      ctx.fillText('Defending', W / 4, pad + 22);
+      ctx.fillText('Attacking', (3 * W) / 4, pad + 22);
+
+      // VS
+      ctx.font = 'bold 44px -apple-system, Helvetica, sans-serif';
+      ctx.fillStyle = '#eab308'; ctx.textAlign = 'center';
+      ctx.fillText('VS', W / 2, pad + 22 + imgSize / 2 + 22);
+
+      // Draw combatant images
+      const drawCombatant = (imgEl: HTMLImageElement | null, word: string, owner: number, cx: number, y: number) => {
+        const x = cx - imgSize / 2;
+        rr(x, y, imgSize, imgSize, 12);
+        ctx.fillStyle = players[owner].color + '30'; ctx.fill();
+        ctx.strokeStyle = players[owner].color; ctx.lineWidth = 4; ctx.stroke();
+        if (imgEl) { ctx.save(); rr(x, y, imgSize, imgSize, 12); ctx.clip(); ctx.drawImage(imgEl, x, y, imgSize, imgSize); ctx.restore(); }
+        // Label bar
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(x, y + imgSize - 30, imgSize, 30);
+        ctx.font = 'bold 18px -apple-system, Helvetica, sans-serif';
+        ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center';
+        ctx.fillText(word, cx, y + imgSize - 10);
+        // Player name
+        ctx.font = '18px -apple-system, Helvetica, sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(players[owner].name, cx, y + imgSize + 28);
+      };
+
+      const imgY = pad + 40;
+      drawCombatant(defImgEl, battleAnimation.defenderObject, battleAnimation.defenderOwner, W / 4, imgY);
+      drawCombatant(atkImgEl, battleAnimation.challenger, battleAnimation.challengerOwner, (3 * W) / 4, imgY);
+
+      // Winner box
+      const boxY = imgY + imgSize + 52;
+      rr(pad, boxY, W - pad * 2, 900 - boxY - pad - 40, 14);
+      ctx.fillStyle = '#0f172a'; ctx.fill();
+      ctx.strokeStyle = '#eab308'; ctx.lineWidth = 2; ctx.stroke();
+
+      // Winner text
+      ctx.font = 'bold 28px -apple-system, Helvetica, sans-serif';
+      ctx.fillStyle = '#eab308'; ctx.textAlign = 'center';
+      ctx.fillText(`${battleAnimation.winner.toUpperCase()} WINS!`, W / 2, boxY + 40);
+
+      // Narrative text (wrapped)
+      ctx.font = '18px -apple-system, Helvetica, sans-serif';
+      ctx.fillStyle = '#e2e8f0'; ctx.textAlign = 'center';
+      const maxW = W - pad * 2 - 32;
+      const words = battleNarrative.split(' ');
+      let line = ''; let lineY = boxY + 78;
+      for (const word of words) {
+        const test = line + word + ' ';
+        if (ctx.measureText(test).width > maxW && line) {
+          ctx.fillText(line.trim(), W / 2, lineY);
+          line = word + ' '; lineY += 26;
+        } else { line = test; }
+      }
+      if (line) ctx.fillText(line.trim(), W / 2, lineY);
+
+      // Branding
+      ctx.font = '16px -apple-system, Helvetica, sans-serif';
+      ctx.fillStyle = '#475569'; ctx.textAlign = 'center';
+      ctx.fillText('Tic Attack Toe', W / 2, 870);
+
+      const b64 = canvas.toDataURL('image/png').split(',')[1];
+      const result = await Filesystem.writeFile({ path: 'tat_narrative.png', data: b64, directory: Directory.Cache });
+      const { Share } = await import('@capacitor/share');
+      await Share.share({ title: shareText, text: shareText, files: [result.uri], dialogTitle: 'Share this battle' });
+      logEvent('share_narrative');
+      haptic.light();
+    } catch {}
+  }, [battleAnimation, battleNarrative, imageCache, players]);
+
   const shareWin = useCallback(async () => {
     const aiOpponent = players.find(p => p.isAI);
     const humanOpponent = players.find(p => !p.isAI && p.profileUUID !== profile?.uuid);
@@ -1665,13 +1914,11 @@ export default function TicTacNo() {
 
     const winnerWord = finalWordRef.current;
     const loserWord = lastBattleLoserRef.current;
-    const appUrl = `https://apps.apple.com/us/app/tic-attack-toe/id${APP_STORE_ID}`;
 
     let text = `I just beat ${opponentName} in Tic Attack Toe!`;
     if (winningMoveWasBattleRef.current && winnerWord && loserWord) {
       text = `I just beat ${opponentName} in Tic Attack Toe. Turns out '${winnerWord}' beats '${loserWord}'!`;
     }
-    text += `\n\n${appUrl}`;
 
     try {
       const { Share } = await import('@capacitor/share');
@@ -1682,6 +1929,7 @@ export default function TicTacNo() {
         dialogTitle: 'Share your victory',
         ...(imgUri ? { files: [imgUri] } : {}),
       });
+      logEvent('share_victory');
       haptic.light();
     } catch {}
   }, [players, profile, captureBoardImage]);
@@ -1719,6 +1967,7 @@ export default function TicTacNo() {
   }, [profile]);
 
   const forfeitGame = useCallback(() => {
+    logEvent('game_forfeited', { mode: gameMode });
     if (profile?.uuid) {
       const myIdx = players.findIndex(p => p.profileUUID === profile.uuid);
       if (myIdx !== -1) {
@@ -1934,6 +2183,7 @@ export default function TicTacNo() {
                 catch { setPsError('Profile saved to server, but could not be stored locally. Your progress will be lost when the app closes.'); }
                 setProfile(newProfile);
                 setPsPin(''); setPsConfirmPin(''); setPsSaving(false);
+                if (!isEdit) logEvent('profile_created');
                 setShowProfileSetup(false);
               }}
               disabled={!canSave}
@@ -2319,23 +2569,59 @@ export default function TicTacNo() {
 
             <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">Sound</p>
             <div className="bg-slate-800/60 rounded-2xl overflow-hidden divide-y divide-white/5">
-              <div className="flex items-center justify-between px-4 py-3.5">
-                <div>
-                  <p className="text-white font-bold text-sm">Music</p>
-                  <p className="text-white/40 text-xs">Background music during games</p>
+              <div className="px-4 py-3.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-bold text-sm">Music <span className="text-white/40 font-normal">(by OdyC)</span></p>
+                    <p className="text-white/40 text-xs">Background music during games</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings(s => ({ ...s, music: !s.music }))}
+                    className={`w-12 h-7 rounded-full transition-colors relative ${settings.music ? 'bg-purple-500' : 'bg-white/20'}`}>
+                    <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${settings.music ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`} />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setSettings(s => ({ ...s, music: !s.music }))}
-                  className={`w-12 h-7 rounded-full transition-colors relative ${settings.music ? 'bg-purple-500' : 'bg-white/20'}`}>
-                  <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${settings.music ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`} />
-                </button>
+                {settings.music && (
+                  <div className="mt-3 flex items-center gap-3">
+                    <p className="text-white/40 text-xs w-12 shrink-0">Volume</p>
+                    <input type="range" min="0" max="1" step="0.05"
+                      value={settings.musicVolume}
+                      onChange={e => {
+                        const vol = parseFloat(e.target.value);
+                        if (musicGainRef.current) musicGainRef.current.gain.value = vol;
+                        setSettings(s => ({ ...s, musicVolume: vol }));
+                      }}
+                      className="flex-1 accent-purple-500 h-1.5 rounded-full" />
+                    <p className="text-white/40 text-xs w-8 text-right">{Math.round(settings.musicVolume * 100)}%</p>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center justify-between px-4 py-3.5 opacity-40">
-                <div>
-                  <p className="text-white font-bold text-sm">Sound Effects</p>
-                  <p className="text-white/40 text-xs">Battle sounds, wins, and placements</p>
+              <div className="px-4 py-3.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-bold text-sm">Sound Effects</p>
+                    <p className="text-white/40 text-xs">Battle sounds, wins, and placements</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings(s => ({ ...s, sfx: !s.sfx }))}
+                    className={`w-12 h-7 rounded-full transition-colors relative ${settings.sfx ? 'bg-purple-500' : 'bg-white/20'}`}>
+                    <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${settings.sfx ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`} />
+                  </button>
                 </div>
-                <p className="text-white/40 text-xs font-bold">Coming soon</p>
+                {settings.sfx && (
+                  <div className="mt-3 flex items-center gap-3">
+                    <p className="text-white/40 text-xs w-12 shrink-0">Volume</p>
+                    <input type="range" min="0" max="1" step="0.05"
+                      value={settings.sfxVolume}
+                      onChange={e => {
+                        const vol = parseFloat(e.target.value);
+                        _sfxVolume = vol;
+                        setSettings(s => ({ ...s, sfxVolume: vol }));
+                      }}
+                      className="flex-1 accent-purple-500 h-1.5 rounded-full" />
+                    <p className="text-white/40 text-xs w-8 text-right">{Math.round(settings.sfxVolume * 100)}%</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2353,7 +2639,7 @@ export default function TicTacNo() {
                 {/* Profile row */}
                 <div className="flex items-center justify-between">
                   {profile ? (
-                    <button className="flex items-center gap-3 text-left" onClick={() => setShowProfile(true)}>
+                    <button className="flex items-center gap-3 text-left" onClick={() => { setShowProfile(true); logEvent('profile_viewed'); }}>
                       {profile.avatarUrl && <img src={profile.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />}
                       <div>
                         <p className="text-white font-bold text-sm">{profile.gamertag}</p>
@@ -2368,14 +2654,14 @@ export default function TicTacNo() {
                     <p className="text-white/40 text-sm">No profile</p>
                   )}
                   <div className="flex items-center gap-3">
-                    <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }} className="text-xl">🏆</button>
+                    <button onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); logEvent('leaderboard_viewed'); }} className="text-xl">🏆</button>
                     <button onClick={() => {
                       setPsGamertag(profile?.gamertag ?? '');
                       setPsAvatarWord(profile?.avatarWord ?? '');
                       setPsAvatarUrl(profile?.avatarUrl ?? '');
                       setShowProfileSetup(true);
                     }} className="text-xl">👤</button>
-                    <button onClick={() => setShowSettings(true)}
+                    <button onClick={() => { setShowSettings(true); logEvent('settings_opened'); }}
                       className="text-white/60 hover:text-white transition-colors">
                       <Settings size={20} />
                     </button>
@@ -2384,12 +2670,12 @@ export default function TicTacNo() {
                 {/* Ranked / Casual toggle */}
                 <div className="flex rounded-xl overflow-hidden border border-white/20 bg-slate-800/60">
                   <button
-                    onClick={() => setIsRanked(false)}
+                    onClick={() => { setIsRanked(false); logEvent('casual_mode_selected'); }}
                     className={`flex-1 py-2.5 text-sm font-bold transition-all ${!isRanked ? 'bg-slate-600 text-white' : 'text-white/60'}`}>
                     Casual
                   </button>
                   <button
-                    onClick={() => setIsRanked(true)}
+                    onClick={() => { setIsRanked(true); logEvent('ranked_mode_selected'); }}
                     className={`flex-1 py-2.5 text-sm font-bold transition-all ${isRanked ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white' : 'text-white/60'}`}>
                     Ranked
                   </button>
@@ -2489,6 +2775,7 @@ export default function TicTacNo() {
                     const emptyBoard = Array(9).fill(null);
                     setBoard(emptyBoard);
                     setPlayers(prev => prev.map(p => p.isAI ? { ...p, name: pickAIName(p.difficulty) } : p));
+                    logEvent('game_started', { mode: 'local', ranked: isRanked });
                     setGamePhase('playing');
                     if (players[0].isAI) setTimeout(() => makeAIMove(0, emptyBoard), 500);
                   }}
@@ -2503,12 +2790,12 @@ export default function TicTacNo() {
       </div>
 
       {showLeaderboard && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-50 p-4 gap-3"
           onClick={() => setShowLeaderboard(false)}>
-          <div className="bg-slate-900 rounded-2xl shadow-2xl p-6 border border-purple-500/30 w-full max-w-md"
+          <h2 className="text-xl font-black text-white">🏆 Leaderboard</h2>
+          <div className="bg-slate-900 rounded-2xl shadow-2xl border border-purple-500/30 w-full max-w-md overflow-hidden"
             onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-black text-white">🏆 Leaderboard</h2>
+            <div className="flex justify-end px-3 pt-3">
               <button onClick={() => setShowLeaderboard(false)} className="text-white/50 hover:text-white text-2xl leading-none">×</button>
             </div>
             {(() => {
@@ -2516,7 +2803,7 @@ export default function TicTacNo() {
                 .map(([uuid, stats]) => ({ uuid, stats, rank: getRank(stats.rp ?? 0) }))
                 .sort((a, b) => (b.stats.rp ?? 0) - (a.stats.rp ?? 0));
               if (allEntries.length === 0) return (
-                <p className="text-white/50 text-center py-8">No players yet.<br/>Play a game to appear here.</p>
+                <p className="text-white/50 text-center py-8 px-6">No players yet.<br/>Play a game to appear here.</p>
               );
               const userIdx = allEntries.findIndex(e => e.uuid === profile?.uuid);
               const center = userIdx === -1 ? 0 : userIdx;
@@ -2526,49 +2813,53 @@ export default function TicTacNo() {
               const aboveCount = start;
               const belowCount = allEntries.length - end;
               return (
-                <div ref={lbContainerRef} className="space-y-2 max-h-96 overflow-y-auto">
-                  {aboveCount > 0 && (
-                    <p className="text-white/30 text-xs text-center py-1">↑ {aboveCount} player{aboveCount !== 1 ? 's' : ''} above</p>
-                  )}
-                  {visible.map(({ uuid, stats, rank }) => {
-                    const i = allEntries.findIndex(e => e.uuid === uuid);
-                    const rp = stats.rp ?? 0;
-                    const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
-                    const isMe = uuid === profile?.uuid;
-                    const tierColor = TIER_DISPLAY[rank.tier].color;
-                    const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / (rank.maxRP - rank.minRP + 1)) * 100);
-                    return (
-                      <div key={uuid} ref={isMe ? lbUserRowRef : undefined}
-                        className={`p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
-                        <div className="flex items-center gap-3">
-                          <span className="text-white/40 font-bold w-6 text-sm shrink-0 text-right">{i + 1}</span>
-                          {stats.avatarUrl
-                            ? <img src={stats.avatarUrl} alt={stats.gamertag} className="w-9 h-9 rounded-full object-cover border-2 border-white/20 shrink-0" />
-                            : <div className="w-9 h-9 rounded-full bg-slate-700 shrink-0" />}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              <span className="text-white font-bold text-sm truncate">{stats.gamertag || 'Unknown'}</span>
-                              {isMe && <span className="text-purple-400 text-xs font-bold shrink-0">YOU</span>}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold shrink-0" style={{ color: tierColor }}>{rank.label}</span>
-                              <span className="text-white/30 text-xs">{rp} RP · {winPct}% wins</span>
+                <>
+                  <div ref={lbContainerRef} className="space-y-2 overflow-y-auto px-4 pb-2" style={{ maxHeight: '410px' }}>
+                    {aboveCount > 0 && (
+                      <p className="text-white/30 text-xs text-center py-1">↑ {aboveCount} player{aboveCount !== 1 ? 's' : ''} above</p>
+                    )}
+                    {visible.map(({ uuid, stats, rank }) => {
+                      const i = allEntries.findIndex(e => e.uuid === uuid);
+                      const rp = stats.rp ?? 0;
+                      const winPct = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0;
+                      const isMe = uuid === profile?.uuid;
+                      const tierColor = TIER_DISPLAY[rank.tier].color;
+                      const progressPct = rank.maxRP === Infinity ? 100 : Math.round(((rp - rank.minRP) / (rank.maxRP - rank.minRP + 1)) * 100);
+                      return (
+                        <div key={uuid} ref={isMe ? lbUserRowRef : undefined}
+                          className={`p-3 rounded-xl border ${isMe ? 'bg-purple-900/30 border-purple-500/50' : 'bg-white/5 border-white/10'}`}>
+                          <div className="flex items-center gap-3">
+                            <span className="text-white/40 font-bold w-6 text-sm shrink-0 text-right">{i + 1}</span>
+                            {stats.avatarUrl
+                              ? <img src={stats.avatarUrl} alt={stats.gamertag} className="w-9 h-9 rounded-full object-cover border-2 border-white/20 shrink-0" />
+                              : <div className="w-9 h-9 rounded-full bg-slate-700 shrink-0" />}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span className="text-white font-bold text-sm truncate">{stats.gamertag || 'Unknown'}</span>
+                                {isMe && <span className="text-purple-400 text-xs font-bold shrink-0">YOU</span>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold shrink-0" style={{ color: tierColor }}>{rank.label}</span>
+                                <span className="text-white/30 text-xs">{rp} RP · {winPct}% wins</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
+                            <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
+                          </div>
                         </div>
-                        <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
-                          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: tierColor }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {belowCount > 0 && (
-                    <p className="text-white/30 text-xs text-center py-1">↓ {belowCount} player{belowCount !== 1 ? 's' : ''} below</p>
-                  )}
-                  <p className="text-white/30 text-xs text-center pt-1">
-                    Bronze (0–299) · Silver (300–599) · Gold (600–799) · Platinum (800–1399) · Titanium (1400–2499) · Obsidian (2500–4999) · Diamond (5000+)
-                  </p>
-                </div>
+                      );
+                    })}
+                    {belowCount > 0 && (
+                      <p className="text-white/30 text-xs text-center py-1">↓ {belowCount} player{belowCount !== 1 ? 's' : ''} below</p>
+                    )}
+                  </div>
+                  <div className="border-t border-white/10 px-4 py-3">
+                    <p className="text-white/25 text-[10px] text-center">
+                      Bronze 0–299 · Silver 300–599 · Gold 600–799 · Platinum 800–1399 · Titanium 1400–2499 · Obsidian 2500–4999 · Diamond 5000+
+                    </p>
+                  </div>
+                </>
               );
             })()}
           </div>
@@ -2693,7 +2984,14 @@ export default function TicTacNo() {
           return (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 cursor-pointer"
               onClick={() => dismissBattleOverlay(battleAnimation)}>
-              <div className="bg-gradient-to-br from-slate-800 via-slate-700 to-slate-800 rounded-2xl shadow-2xl p-8 border border-yellow-500/50 max-w-lg w-full">
+              <div className="relative bg-gradient-to-br from-slate-800 via-slate-700 to-slate-800 rounded-2xl shadow-2xl p-8 border border-yellow-500/50 max-w-lg w-full">
+                {battleAnimation.winner && battleNarrative && (
+                  <button
+                    onClick={e => { e.stopPropagation(); shareNarrative(); }}
+                    className="absolute top-3 right-3 text-white/30 hover:text-white/70 p-1.5 transition-colors">
+                    <Share2 size={18} />
+                  </button>
+                )}
                 <div className="text-center">
                   <div className="flex justify-around items-center mb-5">
                     <CombatantCard word={battleAnimation.defenderObject} owner={battleAnimation.defenderOwner} label="Defending" img={defImg} />
@@ -2702,7 +3000,7 @@ export default function TicTacNo() {
                   </div>
                   <div className="p-4 bg-slate-900/50 rounded-xl border-2 border-yellow-500">
                     {battleAnimation.winner ? (
-                      <p className="text-lg text-yellow-400 font-bold mb-2">🏆 {battleAnimation.winner.toUpperCase()} WINS!</p>
+                      <p className="text-lg text-yellow-400 font-bold mb-2">{battleAnimation.winner.toUpperCase()} WINS!</p>
                     ) : (
                       <p className="text-lg text-yellow-400 font-bold mb-2 animate-pulse">BATTLE IN PROGRESS...</p>
                     )}
@@ -2721,30 +3019,6 @@ export default function TicTacNo() {
           );
         })()}
 
-        {/* Battle log overlay */}
-        {showBattleLog && battleLog.length > 0 && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 flex items-end justify-center p-4"
-            onClick={() => setShowBattleLog(false)}>
-            <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md max-h-80 flex flex-col"
-              onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
-                <span className="text-white font-bold text-sm">Battle History</span>
-                <button onClick={() => setShowBattleLog(false)} className="text-white/40 text-xl leading-none">×</button>
-              </div>
-              <div className="overflow-y-auto p-3 space-y-2">
-                {[...battleLog].reverse().map((b, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className="text-white/50 shrink-0">sq{b.spot + 1}</span>
-                    <span className={b.winner.toLowerCase() === b.challenger.toLowerCase() ? 'text-green-400 font-bold' : 'text-white/40'}>{b.challenger}</span>
-                    <span className="text-white/30">vs</span>
-                    <span className={b.winner.toLowerCase() === b.defender.toLowerCase() ? 'text-green-400 font-bold' : 'text-white/40'}>{b.defender}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Header */}
         <div className="shrink-0 px-4 flex items-center" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
           <div className="flex-1 flex items-center justify-start">
@@ -2755,12 +3029,6 @@ export default function TicTacNo() {
           </div>
           <img src="/logo.png" alt="Tic Attack Toe" className="h-36" />
           <div className="flex-1 flex items-center justify-end gap-2">
-            {battleLog.length > 0 && (
-              <button onClick={() => setShowBattleLog(v => !v)}
-                className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1.5 rounded-lg text-xs font-bold">
-                {battleLog.length}
-              </button>
-            )}
             {!isMultiplayer && <button onClick={restartGame} disabled={isGenerating}
               className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
               <RotateCcw size={16} />
@@ -3100,6 +3368,7 @@ export default function TicTacNo() {
               <button
                 onClick={() => {
                   setShowReviewPrompt(false);
+                  logEvent('review_prompt_accepted');
                   try { localStorage.setItem('tat_review_next', String(Infinity)); } catch {}
                   const url = APP_STORE_ID
                     ? `itms-apps://itunes.apple.com/app/id${APP_STORE_ID}?action=write-review`
@@ -3112,6 +3381,7 @@ export default function TicTacNo() {
               <button
                 onClick={() => {
                   setShowReviewPrompt(false);
+                  logEvent('review_prompt_declined');
                   try {
                     const total = parseInt(localStorage.getItem('tat_total_games') ?? '0') || 0;
                     localStorage.setItem('tat_review_next', String(total + 10));
@@ -3172,7 +3442,7 @@ export default function TicTacNo() {
             <div className="space-y-3 w-full">
               {mpIsHost ? (
                 <button onClick={handleRematch}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-xl hover:shadow-2xl transition-all">
                   Rematch
                 </button>
               ) : (
@@ -3202,7 +3472,7 @@ export default function TicTacNo() {
                   setGamePhase('playing');
                   restartGame();
                 }}
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-4 rounded-xl hover:shadow-2xl transition-all">
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-xl hover:shadow-2xl transition-all">
                 Rematch
               </button>
               <button onClick={resetGame}
